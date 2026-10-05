@@ -137,12 +137,13 @@ SOURCES = {
     "weibo": {
         "label": "微博热搜",
         "site": "微博", "sub": "热搜",
-        "enabled": False,   # GitHub 机房 IP 会被新浪访客系统拦截, 待接入合规来源后再启用
+        "enabled": bool(os.environ.get("WEIBO_COOKIE")),   # 需要在 GitHub Secrets 里放你自己账号的 cookie, 没配就不抓
         "url": "https://s.weibo.com/top/summary?cate=realtimehot",
         "headers": {"Accept": "text/html,application/xhtml+xml",
                     "Accept-Language": "zh-CN,zh;q=0.9",
                     "Referer": "https://s.weibo.com/"},
         "parser": "weibo",
+        "cookie_env": "WEIBO_COOKIE",
         "list_path": "",
         "fields": STD_FIELDS,
         "ranked": True,
@@ -237,6 +238,8 @@ def fingerprint(title):
 def fetch(name, cfg):
     headers = {"User-Agent": UA, "Accept": "application/json"}
     headers.update(cfg.get("headers") or {})
+    if cfg.get("cookie_env") and os.environ.get(cfg["cookie_env"]):
+        headers["Cookie"] = os.environ[cfg["cookie_env"]]
     url = cfg["url"].replace("{today}", datetime.now(CST).strftime("%Y%m%d"))
     resp = None
     for attempt in range(3):

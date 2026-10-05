@@ -27,4 +27,5 @@ jobs:
           OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
           OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
           OSS_KEY: hotspot/hotspots.db
+          WEIBO_COOKIE: ${{ secrets.WEIBO_COOKIE }}
         run: python collect.py
