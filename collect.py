@@ -2,41 +2,68 @@
 # -*- coding: utf-8 -*-
 """
 财经热点采集器 - GitHub Actions 版
-和本地版 collect.py 的区别只有一处: 跑之前先从阿里云 OSS 把数据库文件下载下来,
-跑完之后把最新的数据库文件传回 OSS。这样每次 GitHub 给的都是一台全新机器,
-也能接着上一次的数据继续写,不会归零。
 
-需要在 GitHub 仓库的 Settings > Secrets and variables > Actions 里配置好:
-  OSS_ACCESS_KEY_ID
-  OSS_ACCESS_KEY_SECRET
-  OSS_ENDPOINT      例如 https://oss-cn-shanghai.aliyuncs.com
-  OSS_BUCKET        你的 bucket 名字
-  OSS_KEY           数据库在 OSS 里存放的路径, 例如 hotspot/hotspots.db
+流程: 从 OSS 下载数据库 -> 逐个源采集 -> 导出前端用的 latest.json 并上传 -> 上传 web/index.html -> 把数据库传回 OSS。
+数据库对象权限为私有, latest.json 和页面为公共读(网站要读)。
+
+需要的 Secrets: OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET / OSS_ENDPOINT / OSS_BUCKET
+环境变量 OSS_KEY 为数据库路径, 例如 hotspot/hotspots.db
 """
 
 import hashlib
+import html as htmllib
 import json
 import os
 import re
 import sqlite3
-import sys
 import time
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urljoin
 
 import requests
 import oss2
 
 DB_PATH = "hotspots.db"
 CST = timezone(timedelta(hours=8))
+SITE_PREFIX = "hotspot/"          # 前端和 latest.json 放在 OSS 的这个目录下
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/125.0 Safari/537.36")
+      "(KHTML, like Gecko) Chrome/130.0 Safari/537.36")
+
 
 # ---------------------------------------------------------------------------
-# 源配置, 和本地版一样, 加新源只改这里
+# HTML 源的解析函数: 输入页面文本, 输出 [{title,url,id,hot}, ...]
+# ---------------------------------------------------------------------------
+def parse_weibo(text):
+    out = []
+    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", text, re.S):
+        m_rank = re.search(r'<td class="td-01[^"]*">\s*(\d+)\s*</td>', tr)
+        m_a = re.search(r'<td class="td-02">\s*<a href="([^"]*)"[^>]*>(.*?)</a>(.*?)</td>',
+                        tr, re.S)
+        if not m_rank or not m_a:      # 没有序号的是置顶词, 跳过
+            continue
+        title = htmllib.unescape(re.sub(r"<[^>]+>", "", m_a.group(2))).strip()
+        extra = re.sub(r"<[^>]+>", " ", m_a.group(3))
+        nums = re.findall(r"\d+", extra)
+        out.append({
+            "title": title,
+            "url": urljoin("https://s.weibo.com", m_a.group(1)),
+            "id": None,
+            "hot": nums[-1] if nums else None,
+        })
+    return out
+
+
+PARSERS = {"weibo": parse_weibo}
+
+STD_FIELDS = {"title": "title", "url": "url", "id": "id", "hot": "hot"}
+
+# ---------------------------------------------------------------------------
+# 源配置: 加新源只改这里
 # ---------------------------------------------------------------------------
 SOURCES = {
     "wallstreetcn": {
+        "label": "华尔街见闻",
         "enabled": True,
         "url": "https://api.wscn.net/apiv1/content/information-flow?channel=global&accept=article,live,chart&limit=30",
         "headers": {},
@@ -48,6 +75,32 @@ SOURCES = {
             "hot": None,
         },
         "ranked": False,
+    },
+    "toutiao": {
+        "label": "今日头条热榜",
+        "enabled": True,
+        "url": "https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc",
+        "headers": {"Referer": "https://www.toutiao.com/"},
+        "list_path": "data",
+        "fields": {
+            "title": "Title",
+            "url": "Url",
+            "id": "ClusterIdStr",
+            "hot": "HotValue",
+        },
+        "ranked": True,
+    },
+    "weibo": {
+        "label": "微博热搜",
+        "enabled": True,
+        "url": "https://s.weibo.com/top/summary?cate=realtimehot",
+        "headers": {"Accept": "text/html,application/xhtml+xml",
+                    "Accept-Language": "zh-CN,zh;q=0.9",
+                    "Referer": "https://s.weibo.com/"},
+        "parser": "weibo",
+        "list_path": "",
+        "fields": STD_FIELDS,
+        "ranked": True,
     },
 }
 
@@ -92,22 +145,20 @@ def get_bucket():
 
 
 def download_db():
-    """开跑前, 把上一次存在 OSS 里的数据库取下来。如果 OSS 上还没有, 就从空的开始。"""
     bucket = get_bucket()
     key = os.environ["OSS_KEY"]
     try:
         bucket.get_object_to_file(key, DB_PATH)
         print(f"从 OSS 下载数据库成功: {key}")
     except oss2.exceptions.NoSuchKey:
-        print(f"OSS 上还没有 {key}, 这是第一次运行, 从空数据库开始")
+        print(f"OSS 上还没有 {key}, 从空数据库开始")
 
 
 def upload_db():
-    """跑完后, 把最新的数据库传回 OSS, 供下一次运行接着用。"""
     bucket = get_bucket()
     key = os.environ["OSS_KEY"]
-    bucket.put_object_from_file(key, DB_PATH)
-    print(f"上传数据库到 OSS 成功: {key}")
+    bucket.put_object_from_file(key, DB_PATH, headers={"x-oss-object-acl": "private"})
+    print(f"上传数据库到 OSS 成功(私有): {key}")
 
 
 def db():
@@ -138,23 +189,31 @@ def fingerprint(title):
     return hashlib.md5(norm.encode("utf-8")).hexdigest()[:16]
 
 
-def fetch(cfg):
+def fetch(name, cfg):
     headers = {"User-Agent": UA, "Accept": "application/json"}
     headers.update(cfg.get("headers") or {})
-    resp = requests.get(cfg["url"], headers=headers, timeout=15)
-    resp.raise_for_status()
-    return resp.json()
+    resp = requests.get(cfg["url"], headers=headers, timeout=20)
+    if resp.status_code != 200:
+        print(f"[{name}] HTTP {resp.status_code}, 响应开头: {resp.text[:200]!r}")
+        resp.raise_for_status()
+    if cfg.get("parser"):
+        data = PARSERS[cfg["parser"]](resp.text)
+        if not data:
+            print(f"[{name}] 解析结果为空, 页面长度 {len(resp.text)}, 开头: {resp.text[:300]!r}")
+        return data
+    try:
+        return resp.json()
+    except ValueError:
+        print(f"[{name}] 返回的不是 JSON, 开头: {resp.text[:300]!r}")
+        raise
 
 
 def extract(item, fields):
-    out = {}
-    for std, path in fields.items():
-        out[std] = dig(item, path) if path else None
-    return out
+    return {std: (dig(item, path) if path else None) for std, path in fields.items()}
 
 
 def collect_one(conn, name, cfg):
-    data = fetch(cfg)
+    data = fetch(name, cfg)
     items = dig(data, cfg["list_path"])
     if not isinstance(items, list):
         print(f"[{name}] 取不到列表, 跳过")
@@ -163,12 +222,14 @@ def collect_one(conn, name, cfg):
     ts = now_str()
     cur = conn.cursor()
     new_count = 0
+    kept = 0
 
     for idx, raw in enumerate(items):
         rec = extract(raw, cfg["fields"])
         title = rec.get("title")
         if not title:
             continue
+        kept += 1
         fp = fingerprint(title)
         rank = idx + 1 if cfg.get("ranked") else None
         hot = rec.get("hot")
@@ -177,7 +238,7 @@ def collect_one(conn, name, cfg):
             "INSERT INTO snapshots(source,fingerprint,rank,hot,captured_at,raw) "
             "VALUES (?,?,?,?,?,?)",
             (name, fp, rank, str(hot) if hot is not None else None, ts,
-             json.dumps(raw, ensure_ascii=False)),
+             json.dumps(rec, ensure_ascii=False)),
         )
 
         cur.execute("SELECT id,best_rank FROM items WHERE source=? AND fingerprint=?",
@@ -203,7 +264,7 @@ def collect_one(conn, name, cfg):
             )
 
     conn.commit()
-    print(f"[{name}] {ts} 抓到 {len(items)} 条, 其中新出现 {new_count} 条")
+    print(f"[{name}] {ts} 抓到 {kept} 条, 其中新出现 {new_count} 条")
     return new_count
 
 
@@ -220,7 +281,60 @@ def collect():
     conn.close()
 
 
+def export_latest():
+    """把每个源最近一次采集的榜单导出成 JSON, 供前端读取。"""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    out = {"generated_at": now_str(), "sources": []}
+    for name, cfg in SOURCES.items():
+        if not cfg.get("enabled"):
+            continue
+        last = cur.execute("SELECT MAX(captured_at) FROM snapshots WHERE source=?",
+                           (name,)).fetchone()[0]
+        if not last:
+            continue
+        rows = cur.execute(
+            "SELECT s.rank, s.hot, i.title, i.url, i.first_seen, i.seen_count "
+            "FROM snapshots s JOIN items i ON i.source=s.source AND i.fingerprint=s.fingerprint "
+            "WHERE s.source=? AND s.captured_at=? "
+            "ORDER BY COALESCE(s.rank, 9999), s.id", (name, last)).fetchall()
+        out["sources"].append({
+            "id": name,
+            "label": cfg.get("label", name),
+            "ranked": bool(cfg.get("ranked")),
+            "captured_at": last,
+            "items": [{"rank": r[0], "hot": r[1], "title": r[2], "url": r[3],
+                       "first_seen": r[4], "new": r[5] == 1} for r in rows],
+        })
+    conn.close()
+    return out
+
+
+def upload_site():
+    bucket = get_bucket()
+    data = export_latest()
+    bucket.put_object(
+        SITE_PREFIX + "latest.json",
+        json.dumps(data, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json; charset=utf-8",
+                 "Cache-Control": "no-cache", "x-oss-object-acl": "public-read"},
+    )
+    print(f"上传 latest.json 成功, 共 {len(data['sources'])} 个源")
+    page = os.path.join("web", "index.html")
+    if os.path.exists(page):
+        bucket.put_object_from_file(
+            SITE_PREFIX + "index.html", page,
+            headers={"Content-Type": "text/html; charset=utf-8",
+                     "Cache-Control": "no-cache", "x-oss-object-acl": "public-read"},
+        )
+        print("上传 index.html 成功")
+
+
 if __name__ == "__main__":
     download_db()
     collect()
+    try:
+        upload_site()
+    except Exception as e:
+        print(f"上传站点文件失败: {type(e).__name__}: {e}")
     upload_db()
