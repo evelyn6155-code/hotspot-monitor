@@ -54,7 +54,13 @@ def parse_weibo(text):
     return out
 
 
-PARSERS = {"weibo": parse_weibo}
+def parse_jsonvar(text):
+    """解析形如 `var x = {...};` 的 JS 变量赋值, 返回其中的 JSON 对象。"""
+    m = re.search(r"=\s*(\{.*\})\s*;?\s*$", text.strip(), re.S)
+    return json.loads(m.group(1)) if m else None
+
+
+PARSERS = {"weibo": parse_weibo, "jsonvar": parse_jsonvar}
 
 STD_FIELDS = {"title": "title", "url": "url", "id": "id", "hot": "hot"}
 
@@ -62,8 +68,38 @@ STD_FIELDS = {"title": "title", "url": "url", "id": "id", "hot": "hot"}
 # 源配置: 加新源只改这里
 # ---------------------------------------------------------------------------
 SOURCES = {
+    "wscn_hot_day": {
+        "label": "华尔街见闻·日榜",
+        "enabled": True,
+        "url": "https://api-one-wscn.awtmt.com/apiv1/content/articles/hot?period=all",
+        "headers": {},
+        "list_path": "data.day_items",
+        "fields": {"title": "title", "url": "uri", "id": "id", "hot": "pageviews"},
+        "ranked": True,
+    },
+    "wscn_hot_week": {
+        "label": "华尔街见闻·周榜",
+        "enabled": True,
+        "url": "https://api-one-wscn.awtmt.com/apiv1/content/articles/hot?period=all",
+        "headers": {},
+        "list_path": "data.week_items",
+        "fields": {"title": "title", "url": "uri", "id": "id", "hot": "pageviews"},
+        "ranked": True,
+    },
+    "sina_top": {
+        "label": "新浪财经·点击排行",
+        "enabled": True,
+        "url": ("https://top.finance.sina.com.cn/ws/GetTopDataList.php?top_type=day"
+                "&top_cat=finance_0_suda&top_time={today}&top_show_num=30"
+                "&top_order=DESC&js_var=all_1_data01"),
+        "headers": {"Referer": "https://finance.sina.com.cn/"},
+        "parser": "jsonvar",
+        "list_path": "data",
+        "fields": {"title": "title", "url": "url", "id": "id", "hot": "top_num"},
+        "ranked": True,
+    },
     "wallstreetcn": {
-        "label": "华尔街见闻",
+        "label": "华尔街见闻·资讯流",
         "enabled": True,
         "url": "https://api.wscn.net/apiv1/content/information-flow?channel=global&accept=article,live,chart&limit=30",
         "headers": {},
@@ -77,11 +113,13 @@ SOURCES = {
         "ranked": False,
     },
     "toutiao": {
-        "label": "今日头条热榜",
+        "label": "头条·财经热榜",
         "enabled": True,
         "url": "https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc",
         "headers": {"Referer": "https://www.toutiao.com/"},
         "list_path": "data",
+        # 总榜里每条带 InterestCategory, 只留财经类; 排名保留它在总榜里的位置
+        "filter": {"path": "InterestCategory", "any_of": ["finance"]},
         "fields": {
             "title": "Title",
             "url": "Url",
@@ -192,7 +230,8 @@ def fingerprint(title):
 def fetch(name, cfg):
     headers = {"User-Agent": UA, "Accept": "application/json"}
     headers.update(cfg.get("headers") or {})
-    resp = requests.get(cfg["url"], headers=headers, timeout=20)
+    url = cfg["url"].replace("{today}", datetime.now(CST).strftime("%Y%m%d"))
+    resp = requests.get(url, headers=headers, timeout=20)
     if resp.status_code != 200:
         print(f"[{name}] HTTP {resp.status_code}, 响应开头: {resp.text[:200]!r}")
         resp.raise_for_status()
@@ -224,7 +263,22 @@ def collect_one(conn, name, cfg):
     new_count = 0
     kept = 0
 
+    flt = cfg.get("filter")
+    if flt:
+        from collections import Counter
+        cats = Counter()
+        for raw in items:
+            v = dig(raw, flt["path"])
+            for c in (v if isinstance(v, list) else [v]):
+                cats[str(c)] += 1
+        print(f"[{name}] 总榜 {len(items)} 条, 分类分布: {dict(cats)}")
+
     for idx, raw in enumerate(items):
+        if flt:
+            v = dig(raw, flt["path"])
+            vals = set(str(c) for c in (v if isinstance(v, list) else [v]))
+            if not vals & set(flt["any_of"]):
+                continue
         rec = extract(raw, cfg["fields"])
         title = rec.get("title")
         if not title:
@@ -233,6 +287,8 @@ def collect_one(conn, name, cfg):
         fp = fingerprint(title)
         rank = idx + 1 if cfg.get("ranked") else None
         hot = rec.get("hot")
+        if isinstance(hot, str):
+            hot = hot.replace(",", "").strip()
 
         cur.execute(
             "INSERT INTO snapshots(source,fingerprint,rank,hot,captured_at,raw) "

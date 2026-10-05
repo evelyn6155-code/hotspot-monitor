@@ -27,7 +27,7 @@ ol{list-style:none;margin:0;padding:0;background:var(--card);border:1px solid va
 li{display:flex;gap:12px;align-items:flex-start;padding:11px 14px;border-bottom:1px solid var(--line)}
 li:last-child{border-bottom:0}
 .rk{flex:none;width:26px;text-align:center;color:var(--sub);font-variant-numeric:tabular-nums;padding-top:1px}
-li:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
+li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
 .bd{flex:1;min-width:0}
 .bd a{color:var(--text);text-decoration:none;word-break:break-word}
 .bd a:hover{text-decoration:underline}
@@ -84,8 +84,9 @@ li:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
     metaEl.textContent='本榜单采集于 '+s.captured_at+'（'+ago(s.captured_at)+'），共 '+s.items.length+' 条';
     s.items.forEach(function(it,i){
       var li=document.createElement('li');
+      if(it.rank!=null) li.className='ranked';
       var rk=document.createElement('div');rk.className='rk';
-      rk.textContent=it.rank!=null?it.rank:(i+1);
+      rk.textContent=it.rank!=null?it.rank:'·';
       var bd=document.createElement('div');bd.className='bd';
       var u=safeUrl(it.url), t=document.createElement(u?'a':'span');
       t.textContent=it.title; if(u){t.href=u;t.target='_blank';t.rel='noopener noreferrer';}
