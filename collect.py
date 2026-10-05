@@ -70,6 +70,7 @@ STD_FIELDS = {"title": "title", "url": "url", "id": "id", "hot": "hot"}
 SOURCES = {
     "wscn_hot_day": {
         "label": "华尔街见闻·日榜",
+        "site": "华尔街见闻", "sub": "日榜",
         "enabled": True,
         "url": "https://api-one-wscn.awtmt.com/apiv1/content/articles/hot?period=all",
         "headers": {},
@@ -79,6 +80,7 @@ SOURCES = {
     },
     "wscn_hot_week": {
         "label": "华尔街见闻·周榜",
+        "site": "华尔街见闻", "sub": "周榜",
         "enabled": True,
         "url": "https://api-one-wscn.awtmt.com/apiv1/content/articles/hot?period=all",
         "headers": {},
@@ -88,6 +90,7 @@ SOURCES = {
     },
     "sina_top": {
         "label": "新浪财经·点击排行",
+        "site": "新浪财经", "sub": "点击排行",
         "enabled": True,
         "url": ("https://top.finance.sina.com.cn/ws/GetTopDataList.php?top_type=day"
                 "&top_cat=finance_0_suda&top_time={today}&top_show_num=30"
@@ -100,6 +103,7 @@ SOURCES = {
     },
     "wallstreetcn": {
         "label": "华尔街见闻·资讯流",
+        "site": "华尔街见闻", "sub": "资讯流",
         "enabled": True,
         "url": "https://api.wscn.net/apiv1/content/information-flow?channel=global&accept=article,live,chart&limit=30",
         "headers": {},
@@ -114,11 +118,13 @@ SOURCES = {
     },
     "toutiao": {
         "label": "头条·财经热榜",
+        "site": "今日头条", "sub": "财经热榜",
         "enabled": True,
         "url": "https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc",
         "headers": {"Referer": "https://www.toutiao.com/"},
         "list_path": "data",
         # 总榜里每条带 InterestCategory, 只留财经类; 排名保留它在总榜里的位置
+        "url_template": "https://www.toutiao.com/trending/{id}/",
         "filter": {"path": "InterestCategory", "any_of": ["finance"]},
         "fields": {
             "title": "Title",
@@ -130,6 +136,7 @@ SOURCES = {
     },
     "weibo": {
         "label": "微博热搜",
+        "site": "微博", "sub": "热搜",
         "enabled": False,   # GitHub 机房 IP 会被新浪访客系统拦截, 待接入合规来源后再启用
         "url": "https://s.weibo.com/top/summary?cate=realtimehot",
         "headers": {"Accept": "text/html,application/xhtml+xml",
@@ -231,7 +238,16 @@ def fetch(name, cfg):
     headers = {"User-Agent": UA, "Accept": "application/json"}
     headers.update(cfg.get("headers") or {})
     url = cfg["url"].replace("{today}", datetime.now(CST).strftime("%Y%m%d"))
-    resp = requests.get(url, headers=headers, timeout=20)
+    resp = None
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, headers=headers, timeout=20)
+            break
+        except requests.exceptions.RequestException as e:
+            print(f"[{name}] 第 {attempt + 1} 次请求失败: {type(e).__name__}")
+            if attempt == 2:
+                raise
+            time.sleep(2)
     if resp.status_code != 200:
         print(f"[{name}] HTTP {resp.status_code}, 响应开头: {resp.text[:200]!r}")
         resp.raise_for_status()
@@ -280,6 +296,8 @@ def collect_one(conn, name, cfg):
             if not vals & set(flt["any_of"]):
                 continue
         rec = extract(raw, cfg["fields"])
+        if cfg.get("url_template") and rec.get("id"):
+            rec["url"] = cfg["url_template"].format(id=rec["id"])
         title = rec.get("title")
         if not title:
             continue
@@ -357,6 +375,8 @@ def export_latest():
         out["sources"].append({
             "id": name,
             "label": cfg.get("label", name),
+            "site": cfg.get("site", cfg.get("label", name)),
+            "sub": cfg.get("sub", ""),
             "ranked": bool(cfg.get("ranked")),
             "captured_at": last,
             "items": [{"rank": r[0], "hot": r[1], "title": r[2], "url": r[3],

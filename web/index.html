@@ -21,6 +21,10 @@ h1{margin:0;font-size:18px}
 #tabs{display:flex;gap:8px;margin-top:10px;overflow-x:auto;padding-bottom:2px}
 .tab{flex:none;border:0;background:var(--tab);color:var(--text);padding:6px 14px;border-radius:16px;font-size:14px;cursor:pointer}
 .tab.on{background:var(--accent);color:#fff}
+#subs{display:flex;gap:6px;margin-top:8px;overflow-x:auto}
+#subs:empty{display:none}
+.sub-tab{flex:none;border:0;border-bottom:2px solid transparent;background:none;color:var(--sub);padding:4px 10px;font-size:13px;cursor:pointer}
+.sub-tab.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
 main{max-width:860px;margin:0 auto;padding:12px 16px 40px}
 .meta{color:var(--sub);font-size:12px;margin:4px 2px 10px}
 ol{list-style:none;margin:0;padding:0;background:var(--card);border:1px solid var(--line);border-radius:10px}
@@ -40,6 +44,7 @@ li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
 <header>
   <div class="top"><h1>财经热点监测</h1><span id="updated">加载中…</span></div>
   <div id="tabs"></div>
+  <div id="subs"></div>
 </header>
 <main>
   <div class="meta" id="meta"></div>
@@ -50,7 +55,7 @@ li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
 <script>
 (function(){
   var state={data:null,cur:null};
-  var tabsEl=document.getElementById('tabs'),listEl=document.getElementById('list'),
+  var tabsEl=document.getElementById('tabs'),subsEl=document.getElementById('subs'),listEl=document.getElementById('list'),
       metaEl=document.getElementById('meta'),updEl=document.getElementById('updated'),
       emptyEl=document.getElementById('empty'),errEl=document.getElementById('err');
 
@@ -68,14 +73,34 @@ li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
     var h=Math.floor(m/60); if(h<24) return h+' 小时前';
     return Math.floor(h/24)+' 天前';
   }
-  function renderTabs(){
-    tabsEl.textContent='';
+  function sites(){
+    var order=[],map={};
     state.data.sources.forEach(function(s){
+      var k=s.site||s.label;
+      if(!map[k]){map[k]=[];order.push(k);}
+      map[k].push(s);
+    });
+    return {order:order,map:map};
+  }
+  function renderTabs(){
+    var g=sites(), curSrc=state.data.sources.filter(function(x){return x.id===state.cur;})[0];
+    var curSite=curSrc?(curSrc.site||curSrc.label):g.order[0];
+    tabsEl.textContent='';subsEl.textContent='';
+    g.order.forEach(function(k){
       var b=document.createElement('button');
-      b.className='tab'+(s.id===state.cur?' on':''); b.textContent=s.label;
-      b.onclick=function(){state.cur=s.id;renderTabs();renderList();};
+      b.className='tab'+(k===curSite?' on':''); b.textContent=k;
+      b.onclick=function(){state.cur=g.map[k][0].id;renderTabs();renderList();};
       tabsEl.appendChild(b);
     });
+    var list=g.map[curSite]||[];
+    if(list.length>1){
+      list.forEach(function(s){
+        var b=document.createElement('button');
+        b.className='sub-tab'+(s.id===state.cur?' on':''); b.textContent=s.sub||s.label;
+        b.onclick=function(){state.cur=s.id;renderTabs();renderList();};
+        subsEl.appendChild(b);
+      });
+    }
   }
   function renderList(){
     var s=state.data.sources.filter(function(x){return x.id===state.cur;})[0];
