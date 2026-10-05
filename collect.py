@@ -92,7 +92,7 @@ SOURCES = {
     },
     "weibo": {
         "label": "微博热搜",
-        "enabled": True,
+        "enabled": False,   # GitHub 机房 IP 会被新浪访客系统拦截, 待接入合规来源后再启用
         "url": "https://s.weibo.com/top/summary?cate=realtimehot",
         "headers": {"Accept": "text/html,application/xhtml+xml",
                     "Accept-Language": "zh-CN,zh;q=0.9",

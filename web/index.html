@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>财经热点监测</title>
+<style>
+:root{
+  --bg:#f6f7f9; --card:#fff; --text:#1c2026; --sub:#6b7380; --line:#e6e8ec;
+  --accent:#c8321e; --new:#d4380d; --tab:#eceef2;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#14171c; --card:#1c2026; --text:#e8eaee; --sub:#98a0ad; --line:#2a2f37; --accent:#ff6a55; --new:#ff7a45; --tab:#252a32;}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:14px 16px 10px;border-bottom:1px solid var(--line)}
+.top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+h1{margin:0;font-size:18px}
+#updated{color:var(--sub);font-size:12px}
+#tabs{display:flex;gap:8px;margin-top:10px;overflow-x:auto;padding-bottom:2px}
+.tab{flex:none;border:0;background:var(--tab);color:var(--text);padding:6px 14px;border-radius:16px;font-size:14px;cursor:pointer}
+.tab.on{background:var(--accent);color:#fff}
+main{max-width:860px;margin:0 auto;padding:12px 16px 40px}
+.meta{color:var(--sub);font-size:12px;margin:4px 2px 10px}
+ol{list-style:none;margin:0;padding:0;background:var(--card);border:1px solid var(--line);border-radius:10px}
+li{display:flex;gap:12px;align-items:flex-start;padding:11px 14px;border-bottom:1px solid var(--line)}
+li:last-child{border-bottom:0}
+.rk{flex:none;width:26px;text-align:center;color:var(--sub);font-variant-numeric:tabular-nums;padding-top:1px}
+li:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
+.bd{flex:1;min-width:0}
+.bd a{color:var(--text);text-decoration:none;word-break:break-word}
+.bd a:hover{text-decoration:underline}
+.sub{color:var(--sub);font-size:12px;margin-top:2px}
+.badge{display:inline-block;background:var(--new);color:#fff;font-size:11px;padding:0 5px;border-radius:3px;margin-left:6px;vertical-align:1px}
+.empty,.err{color:var(--sub);text-align:center;padding:40px 0}
+</style>
+</head>
+<body>
+<header>
+  <div class="top"><h1>财经热点监测</h1><span id="updated">加载中…</span></div>
+  <div id="tabs"></div>
+</header>
+<main>
+  <div class="meta" id="meta"></div>
+  <ol id="list"></ol>
+  <div class="empty" id="empty" hidden>暂无数据</div>
+  <div class="err" id="err" hidden></div>
+</main>
+<script>
+(function(){
+  var state={data:null,cur:null};
+  var tabsEl=document.getElementById('tabs'),listEl=document.getElementById('list'),
+      metaEl=document.getElementById('meta'),updEl=document.getElementById('updated'),
+      emptyEl=document.getElementById('empty'),errEl=document.getElementById('err');
+
+  function safeUrl(u){ return /^https?:\/\//i.test(u||'') ? u : null; }
+  function fmtHot(h){
+    var n=Number(h); if(!isFinite(n)||h===null||h==='') return '';
+    if(n>=1e8) return (n/1e8).toFixed(1)+' 亿';
+    if(n>=1e4) return (n/1e4).toFixed(1)+' 万';
+    return String(n);
+  }
+  function ago(ts){
+    var t=new Date(ts.replace(' ','T')+'+08:00').getTime(), m=Math.round((Date.now()-t)/60000);
+    if(isNaN(m)) return ts;
+    if(m<1) return '刚刚'; if(m<60) return m+' 分钟前';
+    var h=Math.floor(m/60); if(h<24) return h+' 小时前';
+    return Math.floor(h/24)+' 天前';
+  }
+  function renderTabs(){
+    tabsEl.textContent='';
+    state.data.sources.forEach(function(s){
+      var b=document.createElement('button');
+      b.className='tab'+(s.id===state.cur?' on':''); b.textContent=s.label;
+      b.onclick=function(){state.cur=s.id;renderTabs();renderList();};
+      tabsEl.appendChild(b);
+    });
+  }
+  function renderList(){
+    var s=state.data.sources.filter(function(x){return x.id===state.cur;})[0];
+    listEl.textContent=''; emptyEl.hidden=true;
+    if(!s||!s.items.length){emptyEl.hidden=false;metaEl.textContent='';return;}
+    metaEl.textContent='本榜单采集于 '+s.captured_at+'（'+ago(s.captured_at)+'），共 '+s.items.length+' 条';
+    s.items.forEach(function(it,i){
+      var li=document.createElement('li');
+      var rk=document.createElement('div');rk.className='rk';
+      rk.textContent=it.rank!=null?it.rank:(i+1);
+      var bd=document.createElement('div');bd.className='bd';
+      var u=safeUrl(it.url), t=document.createElement(u?'a':'span');
+      t.textContent=it.title; if(u){t.href=u;t.target='_blank';t.rel='noopener noreferrer';}
+      bd.appendChild(t);
+      if(it.new){var nb=document.createElement('span');nb.className='badge';nb.textContent='新';bd.appendChild(nb);}
+      var parts=[]; var h=fmtHot(it.hot); if(h) parts.push('热度 '+h);
+      if(it.first_seen) parts.push('首次出现 '+it.first_seen.slice(5,16));
+      if(parts.length){var sub=document.createElement('div');sub.className='sub';sub.textContent=parts.join(' · ');bd.appendChild(sub);}
+      li.appendChild(rk);li.appendChild(bd);listEl.appendChild(li);
+    });
+  }
+  function load(){
+    fetch('latest.json?t='+Date.now(),{cache:'no-store'}).then(function(r){
+      if(!r.ok) throw new Error('HTTP '+r.status); return r.json();
+    }).then(function(d){
+      state.data=d; errEl.hidden=true;
+      if(!d.sources||!d.sources.length){updEl.textContent='';emptyEl.hidden=false;return;}
+      if(!state.cur||!d.sources.some(function(s){return s.id===state.cur;})) state.cur=d.sources[0].id;
+      updEl.textContent='数据生成于 '+d.generated_at;
+      renderTabs();renderList();
+    }).catch(function(e){
+      errEl.hidden=false; errEl.textContent='数据加载失败：'+e.message;
+    });
+  }
+  load(); setInterval(load,60000);
+})();
+</script>
+</body>
+</html>
