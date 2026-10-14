@@ -106,7 +106,7 @@ li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
     var s=state.data.sources.filter(function(x){return x.id===state.cur;})[0];
     listEl.textContent=''; emptyEl.hidden=true;
     if(!s||!s.items.length){emptyEl.hidden=false;metaEl.textContent='';return;}
-    metaEl.textContent='本榜单采集于 '+s.captured_at+'（'+ago(s.captured_at)+'），共 '+s.items.length+' 条';
+    metaEl.textContent='本榜单采集于 '+s.captured_at+'（'+ago(s.captured_at)+'），共 '+s.items.length+' 条'+(s.rank_date?'；榜单日期 '+s.rank_date.replace(/(\d{4})(\d{2})(\d{2})/,'$1-$2-$3'):'');
     s.items.forEach(function(it,i){
       var li=document.createElement('li');
       if(it.rank!=null) li.className='ranked';
@@ -118,7 +118,7 @@ li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
       bd.appendChild(t);
       if(it.new){var nb=document.createElement('span');nb.className='badge';nb.textContent='新';bd.appendChild(nb);}
       var parts=[]; var h=fmtHot(it.hot); if(h) parts.push('热度 '+h);
-      if(it.first_seen) parts.push('首次出现 '+it.first_seen.slice(5,16));
+      if(it.pub) parts.push('发布 '+it.pub.slice(5,16)); else if(it.first_seen) parts.push('采集到 '+it.first_seen.slice(5,16));
       if(parts.length){var sub=document.createElement('div');sub.className='sub';sub.textContent=parts.join(' · ');bd.appendChild(sub);}
       li.appendChild(rk);li.appendChild(bd);listEl.appendChild(li);
     });

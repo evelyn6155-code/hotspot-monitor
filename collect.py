@@ -75,7 +75,8 @@ SOURCES = {
         "url": "https://api-one-wscn.awtmt.com/apiv1/content/articles/hot?period=all",
         "headers": {},
         "list_path": "data.day_items",
-        "fields": {"title": "title", "url": "uri", "id": "id", "hot": "pageviews"},
+        "fields": {"title": "title", "url": "uri", "id": "id", "hot": "pageviews",
+                   "pub": "display_time"},
         "ranked": True,
     },
     "wscn_hot_week": {
@@ -85,7 +86,8 @@ SOURCES = {
         "url": "https://api-one-wscn.awtmt.com/apiv1/content/articles/hot?period=all",
         "headers": {},
         "list_path": "data.week_items",
-        "fields": {"title": "title", "url": "uri", "id": "id", "hot": "pageviews"},
+        "fields": {"title": "title", "url": "uri", "id": "id", "hot": "pageviews",
+                   "pub": "display_time"},
         "ranked": True,
     },
     "sina_top": {
@@ -98,7 +100,9 @@ SOURCES = {
         "headers": {"Referer": "https://finance.sina.com.cn/"},
         "parser": "jsonvar",
         "list_path": "data",
-        "fields": {"title": "title", "url": "url", "id": "id", "hot": "top_num"},
+        "fields": {"title": "title", "url": "url", "id": "id", "hot": "top_num",
+                   "pub": "time"},
+        "note_field": "top_time",   # 新浪榜单自带的榜单日期, 当天数据未生成时会回退到前一天
         "ranked": True,
     },
     "wallstreetcn": {
@@ -113,6 +117,7 @@ SOURCES = {
             "url": "resource.uri",
             "id": "resource.id",
             "hot": None,
+            "pub": "resource.display_time",
         },
         "ranked": False,
     },
@@ -226,6 +231,10 @@ def upload_db():
 def db():
     conn = sqlite3.connect(DB_PATH)
     conn.executescript(SCHEMA)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(items)")]
+    if "pub_time" not in cols:
+        conn.execute("ALTER TABLE items ADD COLUMN pub_time TEXT")
+    conn.execute("CREATE TABLE IF NOT EXISTS meta (source TEXT PRIMARY KEY, note TEXT)")
     return conn
 
 
@@ -244,6 +253,19 @@ def dig(obj, path):
         if cur is None:
             return None
     return cur
+
+
+def norm_pub(v):
+    """把各来源的发布时间统一成 'YYYY-MM-DD HH:MM:SS' (北京时间)。"""
+    if v is None or v == "":
+        return None
+    try:
+        if isinstance(v, (int, float)) or (isinstance(v, str) and v.isdigit()):
+            return datetime.fromtimestamp(int(v), CST).strftime("%Y-%m-%d %H:%M:%S")
+        from email.utils import parsedate_to_datetime
+        return parsedate_to_datetime(str(v)).astimezone(CST).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return None
 
 
 def fingerprint(title):
@@ -320,6 +342,7 @@ def collect_one(conn, name, cfg):
         title = rec.get("title")
         if not title:
             continue
+        pub = norm_pub(rec.get("pub"))
         kept += 1
         fp = fingerprint(title)
         rank = idx + 1 if cfg.get("ranked") else None
@@ -340,10 +363,10 @@ def collect_one(conn, name, cfg):
         if row is None:
             cur.execute(
                 "INSERT INTO items(source,fingerprint,title,url,source_item_id,"
-                "first_seen,last_seen,best_rank) VALUES (?,?,?,?,?,?,?,?)",
+                "first_seen,last_seen,best_rank,pub_time) VALUES (?,?,?,?,?,?,?,?,?)",
                 (name, fp, str(title), rec.get("url"),
                  str(rec.get("id")) if rec.get("id") is not None else None,
-                 ts, ts, rank),
+                 ts, ts, rank, pub),
             )
             new_count += 1
         else:
@@ -351,11 +374,18 @@ def collect_one(conn, name, cfg):
             if rank is not None:
                 best = rank if best is None else min(best, rank)
             cur.execute(
-                "UPDATE items SET last_seen=?, best_rank=?, seen_count=seen_count+1 "
-                "WHERE id=?",
-                (ts, best, item_id),
+                "UPDATE items SET last_seen=?, best_rank=?, seen_count=seen_count+1, "
+                "pub_time=COALESCE(?, pub_time) WHERE id=?",
+                (ts, best, pub, item_id),
             )
 
+    nf = cfg.get("note_field")
+    if nf:
+        vals = [str(dig(r, nf)) for r in items if dig(r, nf)]
+        if vals:
+            top = max(set(vals), key=vals.count)
+            cur.execute("INSERT OR REPLACE INTO meta(source,note) VALUES (?,?)", (name, top))
+            print(f"[{name}] 榜单日期 {top}")
     conn.commit()
     print(f"[{name}] {ts} 抓到 {kept} 条, 其中新出现 {new_count} 条")
     return new_count
@@ -387,7 +417,7 @@ def export_latest():
         if not last:
             continue
         rows = cur.execute(
-            "SELECT s.rank, s.hot, i.title, i.url, i.first_seen, i.seen_count "
+            "SELECT s.rank, s.hot, i.title, i.url, i.first_seen, i.seen_count, i.pub_time "
             "FROM snapshots s JOIN items i ON i.source=s.source AND i.fingerprint=s.fingerprint "
             "WHERE s.source=? AND s.captured_at=? "
             "ORDER BY COALESCE(s.rank, 9999), s.id", (name, last)).fetchall()
@@ -398,8 +428,9 @@ def export_latest():
             "sub": cfg.get("sub", ""),
             "ranked": bool(cfg.get("ranked")),
             "captured_at": last,
+            "rank_date": (cur.execute("SELECT note FROM meta WHERE source=?", (name,)).fetchone() or [None])[0],
             "items": [{"rank": r[0], "hot": r[1], "title": r[2], "url": r[3],
-                       "first_seen": r[4], "new": r[5] == 1} for r in rows],
+                       "first_seen": r[4], "new": r[5] == 1, "pub": r[6]} for r in rows],
         })
     conn.close()
     return out
