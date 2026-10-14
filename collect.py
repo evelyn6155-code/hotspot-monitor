@@ -62,6 +62,60 @@ def parse_jsonvar(text):
 
 PARSERS = {"weibo": parse_weibo, "jsonvar": parse_jsonvar}
 
+
+def fetch_em_rank(cfg):
+    """东方财富个股人气榜: emappdata 取排名, push2 补股票名与涨跌幅。"""
+    r = requests.post(
+        "https://emappdata.eastmoney.com/stockrank/getAllCurrentList",
+        json={"appId": "appId01", "globalId": "786e4c21-70dc-435a-93bb-38",
+              "marketType": "", "pageNo": 1, "pageSize": 100},
+        headers={"User-Agent": UA}, timeout=20)
+    r.raise_for_status()
+    rows = r.json().get("data") or []
+    secids = []
+    for x in rows:
+        sc = x["sc"]
+        secids.append(("1." if sc.startswith("SH") else "0.") + sc[2:])
+    names = {}
+    try:
+        for i in range(0, len(secids), 50):
+            u = ("https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&fields=f2,f3,f12,f14"
+                 "&ut=bd1d9ddb04089700cf9c27f6f7426281&secids=" + ",".join(secids[i:i + 50]))
+            j = requests.get(u, headers={"User-Agent": UA}, timeout=15).json()
+            for d in (j.get("data") or {}).get("diff", []):
+                names[d["f12"]] = d
+    except Exception as e:
+        print(f"[东财人气榜] 取股票名失败, 退回显示代码: {type(e).__name__}: {e}")
+    out = []
+    for x in rows:
+        code = x["sc"][2:]
+        d = names.get(code) or {}
+        pct = d.get("f3")
+        title = d.get("f14") or code
+        out.append({"title": f"{title}({code})",
+                    "url": f"https://guba.eastmoney.com/list,{code}.html",
+                    "id": code,
+                    "hot": f"{pct}%" if isinstance(pct, (int, float)) else None})
+    return out
+
+
+def fetch_xq(cfg):
+    """雪球: 先访问首页拿 cookie, 再请求接口 (未验证, 看日志)。"""
+    s = requests.Session()
+    s.headers.update({"User-Agent": UA, "Referer": "https://xueqiu.com/"})
+    if os.environ.get("XQ_COOKIE"):
+        s.headers["Cookie"] = os.environ["XQ_COOKIE"]
+    else:
+        s.get("https://xueqiu.com/", timeout=15)
+    r = s.get(cfg["xq_url"], timeout=20)
+    if r.status_code != 200:
+        print(f"[雪球] HTTP {r.status_code}: {r.text[:200]!r}")
+        r.raise_for_status()
+    return r.json()
+
+
+FETCHERS = {"em_rank": fetch_em_rank, "xq": fetch_xq}
+
 STD_FIELDS = {"title": "title", "url": "url", "id": "id", "hot": "hot"}
 
 # ---------------------------------------------------------------------------
@@ -93,7 +147,7 @@ SOURCES = {
     "sina_top": {
         "label": "新浪财经·点击排行",
         "site": "新浪财经", "sub": "点击日榜",
-        "enabled": True,
+        "enabled": False,   # 新浪点击排行是前一日日榜, 非实时, 已按需求停用
         "url": ("https://top.finance.sina.com.cn/ws/GetTopDataList.php?top_type=day"
                 "&top_cat=finance_0_suda&top_time={today}&top_show_num=30"
                 "&top_order=DESC&js_var=all_1_data01"),
@@ -166,6 +220,43 @@ SOURCES = {
         "fields": {"title": "word", "url": "url", "id": "word", "hot": None},
         "ranked": True,
     },
+    "em_rank": {
+        "label": "东方财富·个股人气榜",
+        "site": "东方财富", "sub": "个股人气榜",
+        "enabled": True, "fetcher": "em_rank",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot"},
+        "ranked": True,
+    },
+    "ths_hour": {
+        "label": "同花顺·热股榜(小时)",
+        "site": "同花顺", "sub": "热股榜·小时",
+        "enabled": True,
+        "url": "https://dq.10jqka.com.cn/fuyao/hot_list_data/out/hot_list/v1/stock?stock_type=a&type=hour&list_type=normal",
+        "list_path": "data.stock_list",
+        "fields": {"title": "name", "url": "url", "id": "code", "hot": "rate"},
+        "url_template": "https://stockpage.10jqka.com.cn/{id}/",
+        "ranked": True,
+    },
+    "ths_day": {
+        "label": "同花顺·热股榜(日)",
+        "site": "同花顺", "sub": "热股榜·日",
+        "enabled": True,
+        "url": "https://dq.10jqka.com.cn/fuyao/hot_list_data/out/hot_list/v1/stock?stock_type=a&type=day&list_type=normal",
+        "list_path": "data.stock_list",
+        "fields": {"title": "name", "url": "url", "id": "code", "hot": "rate"},
+        "url_template": "https://stockpage.10jqka.com.cn/{id}/",
+        "ranked": True,
+    },
+    "xq_stock": {
+        "label": "雪球·热股榜",
+        "site": "雪球", "sub": "热股榜",
+        "enabled": True, "fetcher": "xq",
+        "xq_url": "https://stock.xueqiu.com/v5/stock/hot_stock/list.json?size=50&_type=10&type=10",
+        "list_path": "data.items",
+        "fields": {"title": "name", "url": "url", "id": "symbol", "hot": "value"},
+        "url_template": "https://xueqiu.com/S/{id}",
+        "ranked": True,
+    },
     "weibo": {
         "label": "微博热搜",
         "site": "微博", "sub": "热搜",
@@ -181,6 +272,9 @@ SOURCES = {
         "ranked": True,
     },
 }
+
+# 页面上网站标签的显示顺序; 没列出的网站排在最后
+SITE_ORDER = ["微博", "抖音", "今日头条", "百度热搜", "东方财富", "同花顺", "雪球", "华尔街见闻"]
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -285,6 +379,8 @@ def fingerprint(title):
 
 
 def fetch(name, cfg):
+    if cfg.get("fetcher"):
+        return FETCHERS[cfg["fetcher"]](cfg)
     headers = {"User-Agent": UA, "Accept": "application/json"}
     headers.update(cfg.get("headers") or {})
     if cfg.get("cookie_env") and os.environ.get(cfg["cookie_env"]):
@@ -447,6 +543,10 @@ def export_latest():
                        "first_seen": r[4], "new": r[5] == 1, "pub": r[6]} for r in rows],
         })
     conn.close()
+    def _key(x):
+        site = x.get("site")
+        return SITE_ORDER.index(site) if site in SITE_ORDER else len(SITE_ORDER)
+    out["sources"].sort(key=_key)   # 稳定排序, 同一网站内保持原来的先后
     return out
 
 
