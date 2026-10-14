@@ -92,7 +92,7 @@ SOURCES = {
     },
     "sina_top": {
         "label": "新浪财经·点击排行",
-        "site": "新浪财经", "sub": "点击排行",
+        "site": "新浪财经", "sub": "点击日榜",
         "enabled": True,
         "url": ("https://top.finance.sina.com.cn/ws/GetTopDataList.php?top_type=day"
                 "&top_cat=finance_0_suda&top_time={today}&top_show_num=30"
@@ -138,8 +138,8 @@ SOURCES = {
         "ranked": True,
     },
     "toutiao": {
-        "label": "头条·财经热榜",
-        "site": "今日头条", "sub": "财经热榜",
+        "label": "头条·总榜财经分类",
+        "site": "今日头条", "sub": "总榜财经分类",
         "enabled": True,
         "url": "https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc",
         "headers": {"Referer": "https://www.toutiao.com/"},
@@ -153,6 +153,17 @@ SOURCES = {
             "id": "ClusterIdStr",
             "hot": "HotValue",
         },
+        "ranked": True,
+    },
+    "baidu_finance": {
+        "label": "百度热搜·财经榜",
+        "site": "百度热搜", "sub": "财经榜",
+        "enabled": True,
+        # 百度热搜官方公开页面的数据接口, 财经榜每 5 分钟更新一次
+        "url": "https://top.baidu.com/api/board?platform=wise&tab=finance",
+        "headers": {"Referer": "https://top.baidu.com/board?tab=finance"},
+        "list_path": "data.cards.0.content.0.content",
+        "fields": {"title": "word", "url": "url", "id": "word", "hot": None},
         "ranked": True,
     },
     "weibo": {
