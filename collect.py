@@ -310,6 +310,9 @@ def extract(item, fields):
 
 def collect_one(conn, name, cfg):
     data = fetch(name, cfg)
+    if isinstance(data, dict):
+        print(f"[{name}] 顶层字段: " + ", ".join(
+            f"{k}({len(v) if hasattr(v, '__len__') else type(v).__name__})" for k, v in data.items()))
     items = dig(data, cfg["list_path"])
     if not isinstance(items, list):
         print(f"[{name}] 取不到列表, 跳过")
