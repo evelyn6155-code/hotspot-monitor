@@ -116,6 +116,22 @@ SOURCES = {
         },
         "ranked": False,
     },
+    "toutiao_all": {
+        "label": "头条·总榜",
+        "site": "今日头条", "sub": "总榜",
+        "enabled": True,
+        "url": "https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc",
+        "headers": {"Referer": "https://www.toutiao.com/"},
+        "list_path": "data",
+        "url_template": "https://www.toutiao.com/trending/{id}/",
+        "fields": {
+            "title": "Title",
+            "url": "Url",
+            "id": "ClusterIdStr",
+            "hot": "HotValue",
+        },
+        "ranked": True,
+    },
     "toutiao": {
         "label": "头条·财经热榜",
         "site": "今日头条", "sub": "财经热榜",
