@@ -77,13 +77,20 @@ def fetch_em_rank(cfg):
         sc = x["sc"]
         secids.append(("1." if sc.startswith("SH") else "0.") + sc[2:])
     names = {}
-    try:
-        for i in range(0, len(secids), 50):
-            u = ("https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&fields=f2,f3,f12,f14"
-                 "&ut=bd1d9ddb04089700cf9c27f6f7426281&secids=" + ",".join(secids[i:i + 50]))
-            j = requests.get(u, headers={"User-Agent": UA}, timeout=15).json()
-            for d in (j.get("data") or {}).get("diff", []):
-                names[d["f12"]] = d
+    try:   # 腾讯行情: 取名称与涨跌幅
+        syms = [x["sc"].lower() for x in rows]
+        for i in range(0, len(syms), 50):
+            t = requests.get("https://qt.gtimg.cn/q=" + ",".join(syms[i:i + 50]),
+                             headers={"User-Agent": UA}, timeout=15).content.decode("gbk", "ignore")
+            for m in re.finditer(r'v_\w{2}(\d{6})="([^"]*)"', t):
+                p = m.group(2).split("~")
+                if len(p) > 32 and p[1]:
+                    try:
+                        pct = float(p[32])
+                    except ValueError:
+                        pct = None
+                    names[m.group(1)] = {"f14": p[1], "f3": pct}
+        print(f"[东财人气榜] 腾讯行情补全名称 {len(names)}/{len(rows)}")
     except Exception as e:
         print(f"[东财人气榜] 取股票名失败, 退回显示代码: {type(e).__name__}: {e}")
     out = []
