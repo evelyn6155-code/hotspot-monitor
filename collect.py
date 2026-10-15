@@ -101,7 +101,7 @@ def fetch_em_rank(cfg):
             items.append((code, "us" + code, f"https://quote.eastmoney.com/us/{code}.html"))
         else:
             code = sc[2:]
-            items.append((code, sc[:2].lower() + code, f"https://guba.eastmoney.com/list,{code}.html"))
+            items.append((code, sc[:2].lower() + code, f"https://quote.eastmoney.com/{sc[:2].lower()}{code}.html"))
     names = {}
     try:
         names = _qt_names([t for _, t, _ in items])
@@ -168,7 +168,8 @@ def _em_extras(rows, kind):
         n = 0
         for k, lst in re_.items():
             if k in res and lst:
-                res[k]["news"] = {"title": lst[0].get("name"), "summary": lst[0].get("summary")}
+                res[k]["news"] = {"title": lst[0].get("name"), "summary": lst[0].get("summary"),
+                                  "url": EM_SEARCH + quote(str(lst[0].get("name", "")))}
                 n += 1
         print(f"[东财热股] 关联热点 {n} 只")
     except Exception as e:
@@ -211,7 +212,8 @@ def fetch_em_board(cfg):
                            headers={"User-Agent": UA}, timeout=20)
         for k, lst in ((json.loads(nr.json().get("RData") or "{}").get("re")) or {}).items():
             if lst:
-                news[k] = {"title": lst[0].get("name"), "summary": lst[0].get("summary")}
+                news[k] = {"title": lst[0].get("name"), "summary": lst[0].get("summary"),
+                           "url": EM_SEARCH + quote(str(lst[0].get("name", "")))}
         print(f"[{cfg['label']}] 关联热点 {len(news)} 个")
     except Exception as e:
         print(f"[{cfg['label']}] 关联热点失败: {type(e).__name__}: {e}")
@@ -317,18 +319,41 @@ def fetch_em_topic(cfg):
 
 
 def fetch_em_theme(cfg):
-    """东方财富题材热榜 (themeInvest/getHotBD)。"""
+    """东方财富题材热榜: getHotBD 给排名与新闻, getThemeQuote 给涨跌幅/涨停家数/领涨股。"""
     import uuid
-    body = {"args": {"bdType": 1}, "client": "android", "randomCode": uuid.uuid4().hex,
-            "timestamp": int(time.time() * 1000), "clientType": "cfw",
-            "clientVersion": "null", "appKey": "h5-dcrb"}
-    r = requests.post("https://emcfgdata.eastmoney.com/api/themeInvest/getHotBD",
-                      json=body, headers={"User-Agent": UA}, timeout=20)
-    r.raise_for_status()
-    j = r.json()
-    for t in (j.get("data") or []):
-        t["_url"] = EM_SEARCH + quote(str(t.get("themeName", "")))
-    return j
+
+    def call(path, args):
+        body = {"args": args, "client": "android", "randomCode": uuid.uuid4().hex,
+                "timestamp": int(time.time() * 1000), "clientType": "cfw",
+                "clientVersion": "null", "appKey": "h5-dcrb"}
+        r = requests.post("https://emcfgdata.eastmoney.com/api/themeInvest/" + path,
+                          json=body, headers={"User-Agent": UA}, timeout=20)
+        r.raise_for_status()
+        return r.json()
+
+    j = call("getHotBD", {"bdType": 1})
+    data = j.get("data") or []
+    quotes = {}
+    try:
+        qj = call("getThemeQuote", {"themeCodes": ",".join(t["themeCode"] for t in data)})
+        for q in qj.get("data") or []:
+            quotes[q.get("themeCode")] = q
+        print(f"[{cfg['label']}] 题材行情 {len(quotes)}/{len(data)}")
+    except Exception as e:
+        print(f"[{cfg['label']}] 题材行情失败: {type(e).__name__}: {e}")
+    out = []
+    for t in data:
+        q = quotes.get(t["themeCode"]) or {}
+        news = None
+        if t.get("newsTitle") or t.get("newsSummary"):
+            news = {"title": t.get("newsTitle"), "summary": t.get("newsSummary"),
+                    "url": EM_SEARCH + quote(str(t.get("newsTitle") or t["themeName"]))}
+        out.append({"title": t["themeName"], "id": t["themeCode"], "hot": t.get("hotRankScore"),
+                    "url": EM_SEARCH + quote(str(t["themeName"])),
+                    "extra": {"pct": q.get("bf3"), "limitup": q.get("fex3"),
+                              "leader": ({"name": q.get("securityName"), "pct": q.get("f3")} if q.get("securityName") else None),
+                              "news": news}})
+    return out
 
 
 def fetch_xq(cfg):
@@ -531,8 +556,8 @@ SOURCES = {
     "em_theme": {
         "label": "东方财富·题材", "site": "东方财富", "sub": "热门板块", "sub2": "题材",
         "enabled": True, "fetcher": "em_theme",
-        "list_path": "data",
-        "fields": {"title": "themeName", "url": "_url", "id": "themeCode", "hot": "hotRankScore"},
+        "list_path": "",
+        "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
         "ranked": True,
     },
     "em_topic": {

@@ -40,15 +40,26 @@ li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
 .badge{display:inline-block;background:var(--new);color:#fff;font-size:11px;padding:0 5px;border-radius:3px;margin-left:6px;vertical-align:1px}
 .empty,.err{color:var(--sub);text-align:center;padding:40px 0}
 
-.lu{display:inline-block;margin-top:4px;font-size:12px;padding:0 6px;border:1px solid #e5322d;color:#e5322d;border-radius:3px}
-.px{margin-top:3px;font-size:13px;font-variant-numeric:tabular-nums}
+.rk{border-radius:5px;width:24px;height:24px;line-height:24px;padding:0;font-size:13px;flex:none}
+.rk.r1{background:#e5322d;color:#fff}.rk.r2{background:#f7731c;color:#fff}.rk.r3{background:#f5a623;color:#fff}
+li.ranked:nth-child(-n+3) .rk{font-weight:700}
+.hd{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}
+.nm{flex:1;min-width:0}
+.nmt{font-size:16px;font-weight:600}
+.cd{color:var(--sub);font-size:12px;margin-top:1px;font-variant-numeric:tabular-nums}
+.lu{display:inline-block;margin-top:3px;font-size:11px;padding:0 5px;border:1px solid #e5322d;color:#e5322d;border-radius:3px}
+.rc,.ld{flex:none;text-align:right;font-variant-numeric:tabular-nums;min-width:68px}
+.pc{font-size:16px;font-weight:600}.pr{font-size:12px;color:var(--sub);margin-top:1px}
+.ld{font-size:13px;min-width:84px}.ld .pc{font-size:14px}
 .up{color:#e5322d}.dn{color:#1a9d58}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .chip{font-size:12px;padding:1px 7px;border-radius:4px;background:#e8f0fb;color:#2a6cc4}
 .chip.feat{background:#fdebe3;color:#d9541e}
-.news{margin-top:6px;padding:6px 8px;border-radius:6px;background:var(--tab);font-size:12px;color:var(--sub);line-height:1.5}
-.news b{color:var(--accent);font-weight:600;margin-right:6px}
-.news .nt{color:var(--text)}
+a.news{display:block;margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--tab);font-size:12px;color:var(--sub);line-height:1.55;text-decoration:none}
+a.news:hover{text-decoration:none;filter:brightness(.97)}
+.news b{display:inline-block;background:var(--accent);color:#fff;font-weight:600;font-size:11px;padding:0 6px;border-radius:3px;margin-right:6px;font-style:italic}
+.news .nt{color:var(--text);font-size:13px}
+.news .sm{margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 </style>
 </head>
 <body>
@@ -131,30 +142,37 @@ li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
     listEl.textContent=''; emptyEl.hidden=true;
     if(!s||!s.items.length){emptyEl.hidden=false;metaEl.textContent='';return;}
     metaEl.textContent='本榜单采集于 '+s.captured_at+'（'+ago(s.captured_at)+'），共 '+s.items.length+' 条'+(s.rank_date?'；榜单日期 '+s.rank_date.replace(/(\d{4})(\d{2})(\d{2})/,'$1-$2-$3'):'');
+    var fmtPct=function(v){return (v>0?'+':'')+Number(v).toFixed(2)+'%';};
+    var cls=function(v){return v>0?'up':(v<0?'dn':'');};
+    var link=function(txt,url,cn){var u=safeUrl(url),e=document.createElement(u?'a':'span');if(cn)e.className=cn;e.textContent=txt;if(u){e.href=u;e.target='_blank';e.rel='noopener noreferrer';}return e;};
     s.items.forEach(function(it,i){
-      var li=document.createElement('li');
-      if(it.rank!=null) li.className='ranked';
-      var rk=document.createElement('div');rk.className='rk';
+      var ex=it.extra, li=document.createElement('li');
+      if(it.rank!=null) li.className='ranked'+(ex?' rich':'');
+      var rk=document.createElement('div');rk.className='rk r'+(it.rank!=null&&it.rank<=3?it.rank:'n');
       rk.textContent=it.rank!=null?it.rank:'·';
       var bd=document.createElement('div');bd.className='bd';
-      var u=safeUrl(it.url), t=document.createElement(u?'a':'span');
-      t.textContent=it.title; if(u){t.href=u;t.target='_blank';t.rel='noopener noreferrer';}
-      bd.appendChild(t);
-      if(it.new){var nb=document.createElement('span');nb.className='badge';nb.textContent='新';bd.appendChild(nb);}
-      var parts=[]; var h=fmtHot(it.hot); if(h) parts.push('热度 '+h);
-      if(it.pub) parts.push('发布 '+it.pub.slice(5,16)); else if(it.first_seen) parts.push('采集到 '+it.first_seen.slice(5,16));
-      var ex=it.extra;
-      if(ex&&(ex.price!=null||ex.pct!=null)){
-        var px=document.createElement('div');px.className='px '+((ex.pct||0)>0?'up':(ex.pct||0)<0?'dn':'');
-        px.textContent=(ex.price!=null?ex.price+'  ':'')+(ex.pct!=null?((ex.pct>0?'+':'')+ex.pct.toFixed(2)+'%'):'');
-        bd.appendChild(px);
+      var hd=document.createElement('div');hd.className='hd';
+      var nm=document.createElement('div');nm.className='nm';
+      var title=it.title, code=null, m=/^(.*?)\(([A-Za-z0-9.]+)\)$/.exec(title||'');
+      if(ex&&m){title=m[1];code=m[2];}
+      nm.appendChild(link(title,it.url,'nmt'));
+      if(it.new){var nb=document.createElement('span');nb.className='badge';nb.textContent='新';nm.appendChild(nb);}
+      if(code){var cd=document.createElement('div');cd.className='cd';cd.textContent=code;nm.appendChild(cd);}
+      if(ex&&ex.limitup){var lu=document.createElement('span');lu.className='lu';lu.textContent=ex.limitup+'家涨停';nm.appendChild(lu);}
+      hd.appendChild(nm);
+      if(ex&&(ex.pct!=null||ex.price!=null)){
+        var rc=document.createElement('div');rc.className='rc';
+        if(ex.pct!=null){var p=document.createElement('div');p.className='pc '+cls(ex.pct);p.textContent=fmtPct(ex.pct);rc.appendChild(p);}
+        if(ex.price!=null){var pr=document.createElement('div');pr.className='pr';pr.textContent=ex.price;rc.appendChild(pr);}
+        hd.appendChild(rc);
       }
-      if(ex&&ex.limitup){var lu=document.createElement('span');lu.className='lu';lu.textContent=ex.limitup+'家涨停';bd.appendChild(lu);}
       if(ex&&ex.leader&&ex.leader.name){
-        var ld=document.createElement('div');ld.className='sub';
-        var lp=ex.leader.pct; ld.textContent='领涨股 '+ex.leader.name+(lp!=null?' '+(lp>0?'+':'')+Number(lp).toFixed(2)+'%':'');
-        bd.appendChild(ld);
+        var ld=document.createElement('div');ld.className='ld';
+        var l1=document.createElement('div');l1.textContent=ex.leader.name;ld.appendChild(l1);
+        if(ex.leader.pct!=null){var l2=document.createElement('div');l2.className='pc '+cls(ex.leader.pct);l2.textContent=fmtPct(ex.leader.pct);ld.appendChild(l2);}
+        hd.appendChild(ld);
       }
+      bd.appendChild(hd);
       if(ex&&ex.tags&&ex.tags.length){
         var cs=document.createElement('div');cs.className='chips';
         ex.tags.forEach(function(t){var c=document.createElement('span');c.className='chip'+(t.k==='feat'?' feat':'');c.textContent=t.t;cs.appendChild(c);});
@@ -162,13 +180,17 @@ li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
       }
       if(ex&&ex.note){var nn=document.createElement('div');nn.className='sub';nn.textContent=ex.note;bd.appendChild(nn);}
       if(ex&&ex.news&&(ex.news.title||ex.news.summary)){
-        var nw=document.createElement('div');nw.className='news';
-        var b=document.createElement('b');b.textContent=ex.news.label||'热点';nw.appendChild(b);
+        var nw=link('',ex.news.url||it.url,'news');
+        var b2=document.createElement('b');b2.textContent=ex.news.label||'热点';nw.appendChild(b2);
         if(ex.news.title){var nt=document.createElement('span');nt.className='nt';nt.textContent=ex.news.title;nw.appendChild(nt);}
-        if(ex.news.summary){var sm=document.createElement('div');sm.textContent=ex.news.summary;nw.appendChild(sm);}
+        if(ex.news.summary){var sm=document.createElement('div');sm.className='sm';sm.textContent=ex.news.summary;nw.appendChild(sm);}
         bd.appendChild(nw);
       }
-      if(parts.length&&!ex){var sub=document.createElement('div');sub.className='sub';sub.textContent=parts.join(' · ');bd.appendChild(sub);}
+      if(!ex){
+        var parts=[]; var h2=fmtHot(it.hot); if(h2) parts.push('热度 '+h2);
+        if(it.pub) parts.push('发布 '+it.pub.slice(5,16)); else if(it.first_seen) parts.push('采集到 '+it.first_seen.slice(5,16));
+        if(parts.length){var sub=document.createElement('div');sub.className='sub';sub.textContent=parts.join(' · ');bd.appendChild(sub);}
+      }
       li.appendChild(rk);li.appendChild(bd);listEl.appendChild(li);
     });
   }
