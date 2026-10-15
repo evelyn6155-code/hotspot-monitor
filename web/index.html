@@ -160,10 +160,11 @@ li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
         ex.tags.forEach(function(t){var c=document.createElement('span');c.className='chip'+(t.k==='feat'?' feat':'');c.textContent=t.t;cs.appendChild(c);});
         bd.appendChild(cs);
       }
-      if(ex&&ex.news&&ex.news.title){
+      if(ex&&ex.note){var nn=document.createElement('div');nn.className='sub';nn.textContent=ex.note;bd.appendChild(nn);}
+      if(ex&&ex.news&&(ex.news.title||ex.news.summary)){
         var nw=document.createElement('div');nw.className='news';
-        var b=document.createElement('b');b.textContent='热点';nw.appendChild(b);
-        var nt=document.createElement('span');nt.className='nt';nt.textContent=ex.news.title;nw.appendChild(nt);
+        var b=document.createElement('b');b.textContent=ex.news.label||'热点';nw.appendChild(b);
+        if(ex.news.title){var nt=document.createElement('span');nt.className='nt';nt.textContent=ex.news.title;nw.appendChild(nt);}
         if(ex.news.summary){var sm=document.createElement('div');sm.textContent=ex.news.summary;nw.appendChild(sm);}
         bd.appendChild(nw);
       }

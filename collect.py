@@ -228,6 +228,68 @@ def fetch_em_board(cfg):
     return out
 
 
+THS_BASE = "https://dq.10jqka.com.cn/fuyao/hot_list_data/out/hot_list/v1/"
+THS_SEARCH = "https://search.10jqka.com.cn/unifiedwap/result?w="
+
+
+def fetch_ths(cfg):
+    """同花顺热榜 (热股/板块/话题/可转债/期货), 统一成 title/url/id/hot/extra。"""
+    kind = cfg["ths_kind"]
+    r = requests.get(cfg["ths_url"], headers={"User-Agent": UA, "Referer": "https://eq.10jqka.com.cn/"}, timeout=20)
+    r.raise_for_status()
+    j = r.json()
+    if j.get("status_code") not in (0, None):
+        raise RuntimeError(f"同花顺返回 status_code={j.get('status_code')} {j.get('status_msg')}")
+    d = j.get("data") or {}
+    out = []
+    if kind == "stock":
+        for x in d.get("stock_list") or []:
+            code, mk = x.get("code"), cfg.get("ths_market", "a")
+            url = (f"https://stockpage.10jqka.com.cn/{code}/" if mk == "a"
+                   else f"https://quote.eastmoney.com/{'hk' if mk == 'hk' else 'us'}/{code}.html")
+            tag = x.get("tag") or {}
+            tags = [{"t": tag["popularity_tag"], "k": "feat"}] if isinstance(tag, dict) and tag.get("popularity_tag") else []
+            tags += [{"t": c, "k": "board"} for c in ((tag.get("concept_tag") or [])[:2] if isinstance(tag, dict) else [])]
+            ex = {"pct": x.get("rise_and_fall"), "tags": tags}
+            if x.get("analyse") or x.get("analyse_title"):
+                ex["news"] = {"label": "原因", "title": x.get("analyse_title"),
+                              "summary": (x.get("analyse") or "").replace("\n", " ")[:140]}
+            out.append({"title": x.get("name"), "url": url, "id": code, "hot": x.get("rate"), "extra": ex})
+    elif kind == "plate":
+        seg = "gn" if cfg.get("plate_type") == "concept" else "thshy"
+        for x in d.get("plate_list") or []:
+            code = x.get("code")
+            tags = [{"t": x[k], "k": kk} for k, kk in (("tag", "feat"), ("hot_tag", "board")) if x.get(k)]
+            note = None
+            if x.get("etf_name"):
+                ep = x.get("etf_rise_and_fall")
+                note = f"关联ETF {x['etf_name']}" + (f" {ep:+.2f}%" if isinstance(ep, (int, float)) else "")
+            out.append({"title": x.get("name"), "id": code, "hot": x.get("rate"),
+                        "url": f"https://q.10jqka.com.cn/{seg}/detail/code/{code}/",
+                        "extra": {"pct": x.get("rise_and_fall"), "tags": tags, "note": note}})
+    elif kind == "topic":
+        for x in d.get("topic_list") or []:
+            u = x.get("jump_url") or ""
+            if not u.startswith("http"):
+                u = "https://t.10jqka.com.cn/lgt/main/frontend-main-service/topic/index.html?code=" + str(x.get("code"))
+            out.append({"title": x.get("title"), "id": x.get("code"), "hot": x.get("hot_value"), "url": u,
+                        "extra": {"news": {"label": "话题", "title": None, "summary": (x.get("description") or "")[:140]}}})
+    elif kind == "bond":
+        for x in (d if isinstance(d, list) else []):
+            out.append({"title": x.get("name"), "id": x.get("code"), "hot": x.get("hot"),
+                        "url": f"https://stockpage.10jqka.com.cn/{x.get('code')}/",
+                        "extra": {"pct": x.get("rise_and_fall")}})
+    elif kind == "future":
+        for x in d.get("futures_list") or []:
+            f = x.get("funds")
+            note = f"资金 {f / 1e8:+.2f} 亿" if isinstance(f, (int, float)) else None
+            out.append({"title": x.get("name"), "id": x.get("code"), "hot": x.get("rate"),
+                        "url": THS_SEARCH + quote(str(x.get("name"))),
+                        "extra": {"pct": x.get("rise_and_fall"), "note": note}})
+    print(f"[{cfg['label']}] 解析 {len(out)} 条")
+    return out
+
+
 EM_SEARCH = "https://so.eastmoney.com/web/s?keyword="
 
 
@@ -299,7 +361,7 @@ def fetch_douyin(cfg):
         raise last
     return {}
 
-FETCHERS = {"em_board": fetch_em_board, "douyin": fetch_douyin, "em_topic": fetch_em_topic, "em_theme": fetch_em_theme, "em_rank": fetch_em_rank, "xq": fetch_xq}
+FETCHERS = {"ths": fetch_ths, "em_board": fetch_em_board, "douyin": fetch_douyin, "em_topic": fetch_em_topic, "em_theme": fetch_em_theme, "em_rank": fetch_em_rank, "xq": fetch_xq}
 
 STD_FIELDS = {"title": "title", "url": "url", "id": "id", "hot": "hot"}
 
@@ -471,24 +533,74 @@ SOURCES = {
         "fields": {"title": "name", "url": "_url", "id": "topicid", "hot": "clickCount"},
         "ranked": True,
     },
-    "ths_hour": {
-        "label": "同花顺·热股榜(小时)",
-        "site": "同花顺", "sub": "热股榜·小时",
-        "enabled": True,
-        "url": "https://dq.10jqka.com.cn/fuyao/hot_list_data/out/hot_list/v1/stock?stock_type=a&type=hour&list_type=normal",
-        "list_path": "data.stock_list",
-        "fields": {"title": "name", "url": "url", "id": "code", "hot": "rate"},
-        "url_template": "https://stockpage.10jqka.com.cn/{id}/",
+    "ths_a_hour": {
+        "label": "同花顺·热股·1小时", "site": "同花顺", "sub": "热股", "sub2": "1小时",
+        "enabled": True, "fetcher": "ths", "ths_kind": "stock",
+        "ths_url": THS_BASE + "stock?stock_type=a&type=hour&list_type=normal",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
         "ranked": True,
     },
-    "ths_day": {
-        "label": "同花顺·热股榜(日)",
-        "site": "同花顺", "sub": "热股榜·日",
-        "enabled": True,
-        "url": "https://dq.10jqka.com.cn/fuyao/hot_list_data/out/hot_list/v1/stock?stock_type=a&type=day&list_type=normal",
-        "list_path": "data.stock_list",
-        "fields": {"title": "name", "url": "url", "id": "code", "hot": "rate"},
-        "url_template": "https://stockpage.10jqka.com.cn/{id}/",
+    "ths_a_day": {
+        "label": "同花顺·热股·24小时", "site": "同花顺", "sub": "热股", "sub2": "24小时",
+        "enabled": True, "fetcher": "ths", "ths_kind": "stock",
+        "ths_url": THS_BASE + "stock?stock_type=a&type=day&list_type=normal",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
+        "ranked": True,
+    },
+    "ths_a_sky": {
+        "label": "同花顺·热股·飙升", "site": "同花顺", "sub": "热股", "sub2": "飙升",
+        "enabled": True, "fetcher": "ths", "ths_kind": "stock",
+        "ths_url": THS_BASE + "stock?stock_type=a&type=hour&list_type=skyrocket",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
+        "ranked": True,
+    },
+    "ths_hk": {
+        "label": "同花顺·热股·港股", "site": "同花顺", "sub": "热股", "sub2": "港股",
+        "enabled": True, "fetcher": "ths", "ths_kind": "stock", "ths_market": "hk",
+        "ths_url": THS_BASE + "stock?stock_type=hk&type=day&list_type=normal",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
+        "ranked": True,
+    },
+    "ths_us": {
+        "label": "同花顺·热股·美股", "site": "同花顺", "sub": "热股", "sub2": "美股",
+        "enabled": True, "fetcher": "ths", "ths_kind": "stock", "ths_market": "us",
+        "ths_url": THS_BASE + "stock?stock_type=usa&type=day&list_type=normal",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
+        "ranked": True,
+    },
+    "ths_plate_concept": {
+        "label": "同花顺·热门板块·概念", "site": "同花顺", "sub": "热门板块", "sub2": "概念",
+        "enabled": True, "fetcher": "ths", "ths_kind": "plate", "plate_type": "concept",
+        "ths_url": THS_BASE + "plate?type=concept",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
+        "ranked": True,
+    },
+    "ths_plate_industry": {
+        "label": "同花顺·热门板块·行业", "site": "同花顺", "sub": "热门板块", "sub2": "行业",
+        "enabled": True, "fetcher": "ths", "ths_kind": "plate", "plate_type": "industry",
+        "ths_url": THS_BASE + "plate?type=industry",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
+        "ranked": True,
+    },
+    "ths_topic": {
+        "label": "同花顺·热门话题", "site": "同花顺", "sub": "热门话题",
+        "enabled": True, "fetcher": "ths", "ths_kind": "topic",
+        "ths_url": THS_BASE + "topic?page=1&page_size=30",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
+        "ranked": True,
+    },
+    "ths_bond": {
+        "label": "同花顺·可转债", "site": "同花顺", "sub": "可转债",
+        "enabled": True, "fetcher": "ths", "ths_kind": "bond",
+        "ths_url": THS_BASE + "bond",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
+        "ranked": True,
+    },
+    "ths_future": {
+        "label": "同花顺·期货", "site": "同花顺", "sub": "期货",
+        "enabled": True, "fetcher": "ths", "ths_kind": "future",
+        "ths_url": THS_BASE + "future",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
         "ranked": True,
     },
     "xq_stock": {
@@ -520,8 +632,9 @@ SOURCES = {
 # 页面上网站标签的显示顺序; 没列出的网站排在最后
 SITE_ORDER = ["微博", "抖音", "今日头条", "百度热搜", "东方财富", "同花顺", "雪球", "华尔街见闻"]
 
-SUB_ORDER = {"东方财富": ["热门话题", "热股", "热门板块", "ETF"]}
-SUB2_ORDER = ["A股", "港股", "美股", "行业", "概念", "题材"]
+SUB_ORDER = {"东方财富": ["热门话题", "热股", "热门板块", "ETF"],
+             "同花顺": ["热股", "热门板块", "热门话题", "可转债", "期货"]}
+SUB2_ORDER = ["A股", "1小时", "24小时", "飙升", "港股", "美股", "行业", "概念", "题材"]
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS snapshots (
