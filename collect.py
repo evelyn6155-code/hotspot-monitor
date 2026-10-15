@@ -491,8 +491,8 @@ SOURCES = {
         "ranked": True,
     },
     "baidu_finance": {
-        "label": "百度热搜·财经榜",
-        "site": "百度热搜", "sub": "财经榜",
+        "label": "百度热榜·财经榜",
+        "site": "百度热榜", "sub": "财经榜",
         "enabled": True,
         # 百度热搜官方公开页面的数据接口, 财经榜每 5 分钟更新一次
         "url": "https://top.baidu.com/api/board?platform=wise&tab=finance",
@@ -664,7 +664,7 @@ SOURCES = {
 }
 
 # 页面上网站标签的显示顺序; 没列出的网站排在最后
-SITE_ORDER = ["微博", "抖音", "今日头条", "百度热搜", "东方财富", "同花顺", "雪球", "华尔街见闻"]
+SITE_ORDER = ["微博", "抖音", "今日头条", "百度热榜", "东方财富", "同花顺", "雪球", "华尔街见闻"]
 
 SUB_ORDER = {"东方财富": ["热门话题", "热股", "热门板块", "ETF"],
              "同花顺": ["热股", "热门板块", "热门话题", "可转债", "期货"]}
@@ -1003,7 +1003,7 @@ MERGE_SOURCES = {          # source id -> (平台名, 权重, 是否财经原生
     "weibo": ("微博", 1.0, False),
     "douyin": ("抖音", 1.0, False),
     "toutiao_all": ("今日头条", 1.0, False),
-    "baidu_finance": ("百度财经", 1.0, True),
+    "baidu_finance": ("百度热榜", 1.0, True),
     "wscn_hot_day": ("华尔街见闻", 0.8, True),
     "em_topic": ("东财话题", 0.8, True),
     "ths_topic": ("同花顺话题", 0.8, True),
