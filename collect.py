@@ -625,14 +625,14 @@ SOURCES = {
     },
     "ths_bond": {
         "label": "同花顺·可转债", "site": "同花顺", "sub": "可转债",
-        "enabled": False,   # 按需求停用, "fetcher": "ths", "ths_kind": "bond",
+        "enabled": False, "fetcher": "ths", "ths_kind": "bond",   # 按需求停用
         "ths_url": THS_BASE + "bond",
         "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
         "ranked": True,
     },
     "ths_future": {
         "label": "同花顺·期货", "site": "同花顺", "sub": "期货",
-        "enabled": False,   # 按需求停用, "fetcher": "ths", "ths_kind": "future",
+        "enabled": False, "fetcher": "ths", "ths_kind": "future",   # 按需求停用
         "ths_url": THS_BASE + "future",
         "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
         "ranked": True,
