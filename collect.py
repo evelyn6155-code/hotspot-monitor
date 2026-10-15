@@ -617,8 +617,8 @@ def collect_one(conn, name, cfg):
                 best = rank if best is None else min(best, rank)
             cur.execute(
                 "UPDATE items SET last_seen=?, best_rank=?, seen_count=seen_count+1, "
-                "pub_time=COALESCE(?, pub_time) WHERE id=?",
-                (ts, best, pub, item_id),
+                "pub_time=COALESCE(?, pub_time), url=COALESCE(?, url) WHERE id=?",
+                (ts, best, pub, rec.get("url"), item_id),
             )
 
     nf = cfg.get("note_field")
