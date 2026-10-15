@@ -167,7 +167,7 @@ a.news:hover{text-decoration:none;filter:brightness(.97)}
 <script>
 (function(){
   var MERGED='__merged';
-  var state={data:null,cur:null,fin:true};
+  var state={data:null,cur:null};
   var $=function(id){return document.getElementById(id);};
   var tabsEl=$('tabs'),subsEl=$('subs'),subs2El=$('subs2'),listEl=$('list'),metaEl=$('meta'),toolsEl=$('tools'),
       stampEl=$('stamp'),mktEl=$('mkt'),emptyEl=$('empty'),errEl=$('err');
@@ -256,13 +256,10 @@ a.news:hover{text-decoration:none;filter:brightness(.97)}
 
   /* ---------- 全网热点 ---------- */
   function renderMerged(){
-    var all=state.data.merged||[],items=state.fin?all.filter(function(x){return x.finance;}):all;
+    var items=(state.data.merged||[]).filter(function(x){return x.finance;});
     listEl.textContent='';emptyEl.hidden=items.length>0;
-    metaEl.textContent='按话题合并同类标题，共 '+items.length+' 个话题；多平台同时上榜的排在前面';
+    metaEl.textContent='按话题合并同类标题，共 '+items.length+' 个财经相关话题；多平台同时上榜的排在前面';
     toolsEl.textContent='';
-    var seg=el('div','seg');
-    [['财经相关',true],['全部',false]].forEach(function(p){var b=el('button',state.fin===p[1]?'on':'',p[0]);b.type='button';b.onclick=function(){state.fin=p[1];store('hs_fin',p[1]?'1':'0');renderList();};seg.appendChild(b);});
-    toolsEl.appendChild(seg);
     items.slice(0,80).forEach(function(it,i){
       var li=el('li'),rk=el('div','rk r'+(i<3?i+1:'n'),i+1),bd=el('div','bd'),hd=el('div','hd'),nm=el('div','nm');
       var first=it.members[0];
@@ -340,8 +337,8 @@ a.news:hover{text-decoration:none;filter:brightness(.97)}
       renderMarket(d.market);renderNav();renderList();
     }).catch(function(e){errEl.hidden=false;errEl.textContent='数据加载失败（'+e.message+'）。检查网络后刷新页面，或稍后再试。';});
   }
-  var saved=store('hs_cur'),fin=store('hs_fin');
-  if(saved)state.cur=saved;if(fin==='0')state.fin=false;
+  var saved=store('hs_cur');
+  if(saved)state.cur=saved;
   load();setInterval(load,60000);
 })();
 </script>
