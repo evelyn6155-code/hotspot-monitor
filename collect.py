@@ -235,8 +235,17 @@ THS_SEARCH = "https://search.10jqka.com.cn/unifiedwap/result?w="
 def fetch_ths(cfg):
     """同花顺热榜 (热股/板块/话题/可转债/期货), 统一成 title/url/id/hot/extra。"""
     kind = cfg["ths_kind"]
-    r = requests.get(cfg["ths_url"], headers={"User-Agent": UA, "Referer": "https://eq.10jqka.com.cn/"}, timeout=20)
-    r.raise_for_status()
+    r = None
+    for attempt in range(3):
+        try:
+            r = requests.get(cfg["ths_url"], headers={"User-Agent": UA, "Accept": "*/*"}, timeout=12)
+            r.raise_for_status()
+            break
+        except requests.exceptions.RequestException as e:
+            print(f"[{cfg['label']}] 第 {attempt + 1} 次请求失败: {type(e).__name__}")
+            if attempt == 2:
+                raise
+            time.sleep(1.5)
     j = r.json()
     if j.get("status_code") not in (0, None):
         raise RuntimeError(f"同花顺返回 status_code={j.get('status_code')} {j.get('status_msg')}")
@@ -775,8 +784,9 @@ def extract(item, fields):
     return {std: (dig(item, path) if path else None) for std, path in fields.items()}
 
 
-def collect_one(conn, name, cfg):
-    data = fetch(name, cfg)
+def collect_one(conn, name, cfg, data=None):
+    if data is None:
+        data = fetch(name, cfg)
     if isinstance(data, dict):
         print(f"[{name}] 顶层字段: " + ", ".join(
             f"{k}({len(v) if hasattr(v, '__len__') else type(v).__name__})" for k, v in data.items()))
@@ -862,15 +872,29 @@ def collect_one(conn, name, cfg):
 
 
 def collect():
+    from concurrent.futures import ThreadPoolExecutor
     conn = db()
-    for name, cfg in SOURCES.items():
-        if not cfg.get("enabled"):
+    active = [(n, c) for n, c in SOURCES.items() if c.get("enabled")]
+
+    def _get(item):
+        n, c = item
+        try:
+            return n, fetch(n, c), None
+        except Exception as e:
+            return n, None, e
+
+    # 网络请求并发执行 (每个源内部自带重试), 入库仍然串行
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        fetched = {n: (d, e) for n, d, e in ex.map(_get, active)}
+    for name, cfg in active:
+        data, err = fetched[name]
+        if err is not None:
+            print(f"[{name}] 失败: {type(err).__name__}: {err}")
             continue
         try:
-            collect_one(conn, name, cfg)
+            collect_one(conn, name, cfg, data)
         except Exception as e:
             print(f"[{name}] 失败: {type(e).__name__}: {e}")
-        time.sleep(1)
     conn.close()
 
 
