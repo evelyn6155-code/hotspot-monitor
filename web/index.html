@@ -69,6 +69,7 @@ button{font:inherit;color:inherit}
 .flow .sep{height:8px}
 .flow .k{color:var(--mast-muted);font-size:12px;margin:0 0 2px}
 
+.mkt.two{grid-template-columns:1.25fr 1.4fr}
 /* 标签栏 */
 .nav{position:sticky;top:0;z-index:5;background:var(--surface);border-bottom:1px solid var(--line)}
 .tabs{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
@@ -135,7 +136,7 @@ footer{max-width:1120px;margin:0 auto;padding:0 20px 40px;font-size:12px;line-he
 .err{color:var(--up)}
 
 @media (max-width:860px){
-  .mkt{grid-template-columns:1fr;gap:18px}
+  .mkt,.mkt.two{grid-template-columns:1fr;gap:18px}
   .wrap,main,footer{padding-left:14px;padding-right:14px}
   .brand{font-size:18px}
   .stamp{font-size:11.5px}
@@ -200,7 +201,7 @@ footer{max-width:1120px;margin:0 auto;padding:0 20px 40px;font-size:12px;line-he
 
   /* ---------- 大盘 ---------- */
   function renderMarket(m){
-    mktEl.textContent='';
+    mktEl.textContent='';mktEl.className='mkt';
     if(!m||(!m.indices&&m.up==null)){mktEl.hidden=true;return;}
     mktEl.hidden=false;
     var c1=el('div');c1.appendChild(el('h3',null,'主要指数'));
@@ -234,6 +235,7 @@ footer{max-width:1120px;margin:0 auto;padding:0 20px 40px;font-size:12px;line-he
       if(m.pool_date!==ymd)c2.appendChild(el('div','note','涨跌停与连板为 '+m.pool_date.slice(4,6)+'-'+m.pool_date.slice(6)+' 收盘数据'));}
     mktEl.appendChild(c2);
 
+    if(!(m.flow_in&&m.flow_in.length)&&!(m.flow_out&&m.flow_out.length)){mktEl.className='mkt two';return;}
     var c3=el('div','flow');c3.appendChild(el('h3',null,'行业资金净流向'));
     function flow(label,arr,sign){
       if(!arr||!arr.length)return;
@@ -308,6 +310,7 @@ footer{max-width:1120px;margin:0 auto;padding:0 20px 40px;font-size:12px;line-he
       var line=el('div');line.appendChild(link(title,it.url,'nmt'));
       if(ex&&ex.limitup)line.appendChild(el('span','lu',ex.limitup+'家涨停'));
       if(it.new)line.appendChild(el('span','badge','新'));
+      if(/有奖/.test(title))line.appendChild(el('span','badge','活动'));
       nm.appendChild(line);
       if(code)nm.appendChild(el('div','cd',code));
       hd.appendChild(nm);

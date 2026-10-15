@@ -1003,7 +1003,7 @@ MERGE_SOURCES = {          # source id -> (平台名, 权重, 是否财经原生
     "weibo": ("微博", 1.0, False),
     "douyin": ("抖音", 1.0, False),
     "toutiao_all": ("今日头条", 1.0, False),
-    "baidu_finance": ("百度热榜", 1.0, True),
+    "baidu_finance": ("百度热榜", 1.0, False),
     "wscn_hot_day": ("华尔街见闻", 0.8, True),
     "em_topic": ("东财话题", 0.8, True),
     "ths_topic": ("同花顺话题", 0.8, True),
@@ -1054,7 +1054,7 @@ def build_merged(sources):
         if not src:
             continue
         for it in src["items"]:
-            if not it.get("title"):
+            if not it.get("title") or "有奖" in it["title"]:   # 平台的推广/活动话题不进合并榜
                 continue
             cands.append({"title": it["title"].strip(), "bg": _bigrams(it["title"]), "site": plat, "sid": sid,
                           "rank": it.get("rank"), "url": it.get("url"), "first": it.get("first_seen"),
