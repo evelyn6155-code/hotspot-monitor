@@ -312,7 +312,7 @@ def fetch_em_topic(cfg):
     txt = r.text.strip()
     m = re.match(r"^[\w$.]+\((.*)\)\s*;?$", txt, re.S)
     j = json.loads(m.group(1) if m else txt)
-    lst = j.get("re") or []
+    lst = [t for t in (j.get("re") or []) if "有奖" not in str(t.get("name", ""))]   # 去掉平台推广/活动话题
     for t in lst:
         t["_url"] = EM_SEARCH + quote(str(t.get("name", "")))
     return {"re": lst}
@@ -1054,7 +1054,7 @@ def build_merged(sources):
         if not src:
             continue
         for it in src["items"]:
-            if not it.get("title") or "有奖" in it["title"]:   # 平台的推广/活动话题不进合并榜
+            if not it.get("title"):
                 continue
             cands.append({"title": it["title"].strip(), "bg": _bigrams(it["title"]), "site": plat, "sid": sid,
                           "rank": it.get("rank"), "url": it.get("url"), "first": it.get("first_seen"),
@@ -1099,9 +1099,9 @@ def build_merged(sources):
         out.append({"title": title, "n": len(ms), "best": min((m["rank"] or 999) for m in ms),
                     "score": round(score, 3), "finance": finance, "rel": rel, "first": first, "new": is_new,
                     "members": [{"site": m["site"], "rank": m["rank"], "title": m["title"], "url": m["url"]} for m in ms]})
-    out.sort(key=lambda x: (-x["n"], -x["score"]))
+    out.sort(key=lambda x: (-x["n"], not x["finance"], -x["score"]))
     print(f"[合并榜] 候选 {len(cands)} 条 -> {len(out)} 个话题, 其中多平台 {sum(1 for x in out if x['n'] > 1)} 个, 财经相关 {sum(1 for x in out if x['finance'])} 个")
-    return out[:150]
+    return out[:200]
 
 
 def export_latest():

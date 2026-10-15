@@ -121,6 +121,8 @@ a.news:hover{text-decoration:none;filter:brightness(.97)}
 .news .sm{margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 
 /* 全网热点 */
+li.fin{box-shadow:inset 3px 0 0 var(--brand);background:linear-gradient(90deg,var(--feat-bg) 0,transparent 140px)}
+.fintag{display:inline-block;margin-left:8px;font-size:11px;padding:0 6px;border-radius:4px;vertical-align:2px;font-weight:600;background:var(--brand);color:#fff}
 .cover{display:flex;align-items:center;gap:8px;margin-top:9px;flex-wrap:wrap}
 .cn{font-size:12px;color:var(--muted);margin-right:2px}
 .pf{white-space:nowrap;display:inline-flex;gap:5px;align-items:baseline;font-size:12.5px;padding:2px 9px;border-radius:6px;background:var(--chip);color:var(--ink)}
@@ -273,14 +275,15 @@ footer{max-width:1120px;margin:0 auto;padding:0 20px 40px;font-size:12px;line-he
 
   /* ---------- 全网热点 ---------- */
   function renderMerged(){
-    var items=(state.data.merged||[]).filter(function(x){return x.finance;});
+    var all=state.data.merged||[],items=all,nf=all.filter(function(x){return x.finance;}).length;
     listEl.textContent='';emptyEl.hidden=items.length>0;
-    metaEl.textContent='按话题合并同类标题，共 '+items.length+' 个财经相关话题；多平台同时上榜的排在前面';
+    metaEl.textContent='各平台榜单按话题合并，共 '+items.length+' 个话题，其中财经相关 '+nf+' 个（红色标记）；多平台同时上榜的排在前面';
     toolsEl.textContent='';
-    items.slice(0,80).forEach(function(it,i){
-      var li=el('li'),rk=el('div','rk r'+(i<3?i+1:'n'),i+1),bd=el('div','bd'),hd=el('div','hd'),nm=el('div','nm');
+    items.slice(0,120).forEach(function(it,i){
+      var li=el('li',it.finance?'fin':''),rk=el('div','rk r'+(i<3?i+1:'n'),i+1),bd=el('div','bd'),hd=el('div','hd'),nm=el('div','nm');
       var first=it.members[0];
       nm.appendChild(link(it.title,first&&first.url,'nmt'));
+      if(it.finance)nm.appendChild(el('span','fintag','财经'));
       if(it.new)nm.appendChild(el('span','badge','新上榜'));
       hd.appendChild(nm);
       var cnt=el('div','cnt'+(it.n>=3?' hot':''));cnt.appendChild(el('div','big',it.n));cnt.appendChild(el('div','sm2','个平台'));hd.appendChild(cnt);
@@ -310,7 +313,6 @@ footer{max-width:1120px;margin:0 auto;padding:0 20px 40px;font-size:12px;line-he
       var line=el('div');line.appendChild(link(title,it.url,'nmt'));
       if(ex&&ex.limitup)line.appendChild(el('span','lu',ex.limitup+'家涨停'));
       if(it.new)line.appendChild(el('span','badge','新'));
-      if(/有奖/.test(title))line.appendChild(el('span','badge','活动'));
       nm.appendChild(line);
       if(code)nm.appendChild(el('div','cd',code));
       hd.appendChild(nm);
