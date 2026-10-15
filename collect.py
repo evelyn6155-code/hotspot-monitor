@@ -63,47 +63,80 @@ def parse_jsonvar(text):
 PARSERS = {"weibo": parse_weibo, "jsonvar": parse_jsonvar}
 
 
+def _qt_names(syms):
+    """腾讯行情批量取名称与涨跌幅。syms 为腾讯代码 (sh600000/hk00700/usAAPL), 返回 {小写代码: (名称, 涨跌幅)}。"""
+    res = {}
+    for i in range(0, len(syms), 50):
+        t = requests.get("https://qt.gtimg.cn/q=" + ",".join(syms[i:i + 50]),
+                         headers={"User-Agent": UA}, timeout=15).content.decode("gbk", "ignore")
+        for m in re.finditer(r'v_([^=]+)="([^"]*)"', t):
+            p = m.group(2).split("~")
+            if len(p) > 32 and p[1]:
+                try:
+                    pct = float(p[32])
+                except ValueError:
+                    pct = None
+                res[m.group(1).lower().split(".")[0]] = (p[1], pct)
+    return res
+
+
 def fetch_em_rank(cfg):
-    """东方财富个股人气榜: emappdata 取排名, push2 补股票名与涨跌幅。"""
+    """东方财富人气榜 (A股/港股/美股/ETF): emappdata 取排名, 腾讯行情补名称与涨跌幅。"""
     r = requests.post(
-        "https://emappdata.eastmoney.com/stockrank/getAllCurrentList",
+        cfg.get("em_url", "https://emappdata.eastmoney.com/stockrank/getAllCurrentList"),
         json={"appId": "appId01", "globalId": "786e4c21-70dc-435a-93bb-38",
-              "marketType": "", "pageNo": 1, "pageSize": 100},
+              "marketType": cfg.get("market_type", ""), "pageNo": 1, "pageSize": 100},
         headers={"User-Agent": UA}, timeout=20)
     r.raise_for_status()
     rows = r.json().get("data") or []
-    secids = []
+    kind = cfg.get("kind", "a")
+    items = []     # (展示代码, 腾讯代码, 链接)
     for x in rows:
         sc = x["sc"]
-        secids.append(("1." if sc.startswith("SH") else "0.") + sc[2:])
+        if kind == "hk":
+            code = sc.split("|")[-1]
+            items.append((code, "hk" + code, f"https://quote.eastmoney.com/hk/{code}.html"))
+        elif kind == "us":
+            code = sc.split("|")[-1]
+            items.append((code, "us" + code, f"https://quote.eastmoney.com/us/{code}.html"))
+        else:
+            code = sc[2:]
+            items.append((code, sc[:2].lower() + code, f"https://guba.eastmoney.com/list,{code}.html"))
     names = {}
-    try:   # 腾讯行情: 取名称与涨跌幅
-        syms = [x["sc"].lower() for x in rows]
-        for i in range(0, len(syms), 50):
-            t = requests.get("https://qt.gtimg.cn/q=" + ",".join(syms[i:i + 50]),
-                             headers={"User-Agent": UA}, timeout=15).content.decode("gbk", "ignore")
-            for m in re.finditer(r'v_\w{2}(\d{6})="([^"]*)"', t):
-                p = m.group(2).split("~")
-                if len(p) > 32 and p[1]:
-                    try:
-                        pct = float(p[32])
-                    except ValueError:
-                        pct = None
-                    names[m.group(1)] = {"f14": p[1], "f3": pct}
-        print(f"[东财人气榜] 腾讯行情补全名称 {len(names)}/{len(rows)}")
+    try:
+        names = _qt_names([t for _, t, _ in items])
+        print(f"[{cfg['label']}] 腾讯行情补全名称 {len(names)}/{len(items)}")
     except Exception as e:
-        print(f"[东财人气榜] 取股票名失败, 退回显示代码: {type(e).__name__}: {e}")
+        print(f"[{cfg['label']}] 取名称失败, 退回显示代码: {type(e).__name__}: {e}")
     out = []
-    for x in rows:
-        code = x["sc"][2:]
-        d = names.get(code) or {}
-        pct = d.get("f3")
-        title = d.get("f14") or code
-        out.append({"title": f"{title}({code})",
-                    "url": f"https://guba.eastmoney.com/list,{code}.html",
-                    "id": code,
-                    "hot": f"{pct}%" if isinstance(pct, (int, float)) else None})
+    for code, tq, url in items:
+        nm, pct = names.get(tq.lower(), (None, None))
+        out.append({"title": f"{nm}({code})" if nm else code, "url": url, "id": code,
+                    "hot": f"{pct}%" if pct is not None else None})
     return out
+
+
+def fetch_em_topic(cfg):
+    """东方财富热门话题 (股吧话题, JSONP 接口去掉 callback 即返回 JSON)。"""
+    u = ("https://gbapi.eastmoney.com/newctopic/topic/HomeTopicRead?deviceid=web&version=100"
+         "&product=EastMoney&plat=Web&p=1&ps=30&needTop=true&needSubscribed=false")
+    r = requests.get(u, headers={"User-Agent": UA}, timeout=20)
+    txt = r.text.strip()
+    m = re.match(r"^[\w$.]+\((.*)\)\s*;?$", txt, re.S)
+    j = json.loads(m.group(1) if m else txt)
+    return {"re": j.get("re") or []}
+
+
+def fetch_em_theme(cfg):
+    """东方财富题材热榜 (themeInvest/getHotBD)。"""
+    import uuid
+    body = {"args": {"bdType": 1}, "client": "android", "randomCode": uuid.uuid4().hex,
+            "timestamp": int(time.time() * 1000), "clientType": "cfw",
+            "clientVersion": "null", "appKey": "h5-dcrb"}
+    r = requests.post("https://emcfgdata.eastmoney.com/api/themeInvest/getHotBD",
+                      json=body, headers={"User-Agent": UA}, timeout=20)
+    r.raise_for_status()
+    return r.json()
 
 
 def fetch_xq(cfg):
@@ -143,7 +176,7 @@ def fetch_douyin(cfg):
         raise last
     return {}
 
-FETCHERS = {"douyin": fetch_douyin, "em_rank": fetch_em_rank, "xq": fetch_xq}
+FETCHERS = {"douyin": fetch_douyin, "em_topic": fetch_em_topic, "em_theme": fetch_em_theme, "em_rank": fetch_em_rank, "xq": fetch_xq}
 
 STD_FIELDS = {"title": "title", "url": "url", "id": "id", "hot": "hot"}
 
@@ -263,10 +296,62 @@ SOURCES = {
         "ranked": True,
     },
     "em_rank": {
-        "label": "东方财富·个股人气榜",
-        "site": "东方财富", "sub": "个股人气榜",
-        "enabled": True, "fetcher": "em_rank",
+        "label": "东方财富·A股热股", "site": "东方财富", "sub": "热股·A股",
+        "enabled": True, "fetcher": "em_rank", "kind": "a",
         "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot"},
+        "ranked": True,
+    },
+    "em_rank_hk": {
+        "label": "东方财富·港股热股", "site": "东方财富", "sub": "热股·港股",
+        "enabled": True, "fetcher": "em_rank", "kind": "hk", "market_type": "000003",
+        "em_url": "https://emappdata.eastmoney.com/stockrank/getAllCurrHkUsList",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot"},
+        "ranked": True,
+    },
+    "em_rank_us": {
+        "label": "东方财富·美股热股", "site": "东方财富", "sub": "热股·美股",
+        "enabled": True, "fetcher": "em_rank", "kind": "us", "market_type": "000004",
+        "em_url": "https://emappdata.eastmoney.com/stockrank/getAllCurrHkUsList",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot"},
+        "ranked": True,
+    },
+    "em_etf": {
+        "label": "东方财富·ETF人气榜", "site": "东方财富", "sub": "ETF",
+        "enabled": True, "fetcher": "em_rank", "kind": "a", "market_type": "etf",
+        "em_url": "https://emappdata.eastmoney.com/fundrank/getAllCurrentETFList",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot"},
+        "ranked": True,
+    },
+    "em_board_industry": {
+        "label": "东方财富·行业板块", "site": "东方财富", "sub": "板块·行业",
+        "enabled": True,
+        "url": "https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_BOARD_BOARDHOTSCORE&columns=ALL&filter=(BOARD_TYPE_NEW%3D%222%22)&source=SECURITIES&pageNumber=1&pageSize=100&client=APP&sortColumns=HOT_RANK&sortTypes=1",
+        "list_path": "result.data",
+        "fields": {"title": "BOARD_NAME", "url": None, "id": "BOARD_CODE", "hot": "HOT_SCORE"},
+        "url_template": "https://quote.eastmoney.com/bk/90.{id}.html",
+        "ranked": True,
+    },
+    "em_board_concept": {
+        "label": "东方财富·概念板块", "site": "东方财富", "sub": "板块·概念",
+        "enabled": True,
+        "url": "https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_BOARD_BOARDHOTSCORE&columns=ALL&filter=(BOARD_TYPE_NEW%3D%223%22)&source=SECURITIES&pageNumber=1&pageSize=100&client=APP&sortColumns=HOT_RANK&sortTypes=1",
+        "list_path": "result.data",
+        "fields": {"title": "BOARD_NAME", "url": None, "id": "BOARD_CODE", "hot": "HOT_SCORE"},
+        "url_template": "https://quote.eastmoney.com/bk/90.{id}.html",
+        "ranked": True,
+    },
+    "em_theme": {
+        "label": "东方财富·题材", "site": "东方财富", "sub": "板块·题材",
+        "enabled": True, "fetcher": "em_theme",
+        "list_path": "data",
+        "fields": {"title": "themeName", "url": None, "id": "themeCode", "hot": "hotRankScore"},
+        "ranked": True,
+    },
+    "em_topic": {
+        "label": "东方财富·热门话题", "site": "东方财富", "sub": "热门话题",
+        "enabled": True, "fetcher": "em_topic",
+        "list_path": "re",
+        "fields": {"title": "name", "url": None, "id": "topicid", "hot": "clickCount"},
         "ranked": True,
     },
     "ths_hour": {
