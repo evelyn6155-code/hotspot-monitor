@@ -1078,7 +1078,7 @@ def _sim(a, b):
     return max(dice, contain * 0.85 if ok else 0.0)
 
 
-FIN_LIMIT, OTHER_LIMIT = 30, 10
+TOP_N = 15
 
 
 def build_merged(sources):
@@ -1163,15 +1163,11 @@ def build_merged(sources):
                     "score": round(score, 3), "finance": finance, "weak": weak, "rel": rel, "first": first,
                     "new": is_new,
                     "members": [{"site": m["site"], "rank": m["rank"], "title": m["title"], "url": m["url"]} for m in ms]})
-    # 两段: 财经重点按命中平台数排 (同数再按分数), 其他跨平台热点只收非财经且至少 2 个平台上榜的话题
-    fin = sorted([x for x in out if x["finance"]], key=lambda x: (-x["n"], -x["score"]))[:FIN_LIMIT]
-    oth = sorted([x for x in out if not x["finance"] and x["n"] >= 2], key=lambda x: (-x["n"], -x["score"]))[:OTHER_LIMIT]
-    for x in fin:
-        x["sec"] = "fin"
-    for x in oth:
-        x["sec"] = "oth"
-    print(f"[合并榜] 候选 {len(cands)} 条 -> {len(out)} 个话题, 财经重点 {len(fin)} 个 (其中多平台 {sum(1 for x in fin if x['n'] > 1)}), 其他跨平台 {len(oth)} 个")
-    return fin + oth
+    # 合并成一个总榜: 按命中平台数从多到少排, 平台数相同再按各平台名次综合分数, 只保留前 TOP_N 个
+    out.sort(key=lambda x: (-x["n"], -x["score"]))
+    top = out[:TOP_N]
+    print(f"[合并榜] 候选 {len(cands)} 条 -> {len(out)} 个话题, 保留前 {len(top)} 个 (其中多平台 {sum(1 for x in top if x['n'] > 1)}, 财经 {sum(1 for x in top if x['finance'])})")
+    return top
 
 
 def export_latest():

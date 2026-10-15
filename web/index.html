@@ -278,15 +278,14 @@ footer{max-width:1120px;margin:0 auto;padding:0 20px 40px;font-size:12px;line-he
 
   /* ---------- 全网热点 ---------- */
   function renderMerged(){
-    var all=state.data.merged||[];
-    var fin=all.filter(function(x){return x.sec==='fin';}),oth=all.filter(function(x){return x.sec==='oth';});
-    listEl.textContent='';emptyEl.hidden=all.length>0;toolsEl.textContent='';
-    metaEl.textContent='按话题合并各平台热搜，同一话题出现的平台越多排名越靠前；平台数相同时按各平台名次综合排序';
-    function head(t,sub){var li=el('li','sech');li.appendChild(el('span','sht',t));if(sub)li.appendChild(el('span','shs',sub));listEl.appendChild(li);}
-    function row(it,i,isFin){
-      var li=el('li',isFin?'fin':''),rk=el('div','rk r'+(i<3?i+1:'n'),i+1),bd=el('div','bd'),hd=el('div','hd'),nm=el('div','nm');
+    var items=state.data.merged||[];
+    listEl.textContent='';emptyEl.hidden=items.length>0;toolsEl.textContent='';
+    metaEl.textContent='各平台热搜按话题合并，同一话题出现的平台越多排名越靠前，平台数相同按各平台名次综合排序；红色为财经相关，共 '+items.length+' 个话题';
+    items.forEach(function(it,i){
+      var li=el('li',it.finance?'fin':''),rk=el('div','rk r'+(i<3?i+1:'n'),i+1),bd=el('div','bd'),hd=el('div','hd'),nm=el('div','nm');
       var first=it.members[0];
       nm.appendChild(link(it.title,first&&first.url,'nmt'));
+      if(it.finance)nm.appendChild(el('span','fintag','财经'));
       if(it.new)nm.appendChild(el('span','badge','新上榜'));
       hd.appendChild(nm);
       var cnt=el('div','cnt'+(it.n>=3?' hot':''));cnt.appendChild(el('div','big',it.n));cnt.appendChild(el('div','sm2','个平台'));hd.appendChild(cnt);
@@ -298,9 +297,7 @@ footer{max-width:1120px;margin:0 auto;padding:0 20px 40px;font-size:12px;line-he
       if(meta.length){var sb=el('div','sub');meta.forEach(function(t,k){var sp=el('span','nw',t);if(k)sb.appendChild(document.createTextNode('　'));sb.appendChild(sp);});bd.appendChild(sb);}
       if(it.rel&&it.rel.length){var cs=el('div','chips');it.rel.forEach(function(r){cs.appendChild(el('span','chip '+(r.k==='stock'?'stock':''),(r.k==='stock'?'个股 ':'板块 ')+r.t));});bd.appendChild(cs);}
       li.appendChild(rk);li.appendChild(bd);listEl.appendChild(li);
-    }
-    if(fin.length){head('财经重点','共 '+fin.length+' 个话题');fin.forEach(function(it,i){row(it,i,true);});}
-    if(oth.length){head('其他跨平台热点','至少 2 个平台同时上榜，仅显示前 '+oth.length+' 个');oth.forEach(function(it,i){row(it,i,false);});}
+    });
   }
 
   /* ---------- 单个榜单 ---------- */
