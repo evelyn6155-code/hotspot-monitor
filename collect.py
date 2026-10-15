@@ -931,7 +931,7 @@ EM_UT = "bd1d9ddb04089700cf9c27f6f7426281"
 EM_POOL_UT = "7eea3edcaed734bea9cbfc24409ed989"
 
 
-def _get_json(url, params, tries=3, timeout=15):
+def _get_json(url, params, tries=4, timeout=15):
     last = None
     for i in range(tries):
         try:
@@ -960,6 +960,7 @@ def fetch_market():
             mk["down"] = (sh["f105"] or 0) + (sz["f105"] or 0)
             mk["flat"] = (sh["f106"] or 0) + (sz["f106"] or 0)
             mk["turnover"] = round(((sh["f6"] or 0) + (sz["f6"] or 0)) / 1e8, 0)
+        mk["idx_at"] = now_str()
     except Exception as e:
         print(f"[大盘] 指数/涨跌家数失败: {type(e).__name__}: {e}")
     # 涨停池/跌停池: 非交易日回退到最近有数据的交易日
@@ -990,6 +991,7 @@ def fetch_market():
                 "fs": "m:90+t:2", "fields": "f12,f14,f3,f62", "ut": EM_UT})
             diff = (j.get("data") or {}).get("diff") or []
             mk[key] = [{"name": d["f14"], "amt": round((d["f62"] or 0) / 1e8, 1), "pct": d["f3"]} for d in diff]
+            mk["flow_at"] = now_str()
     except Exception as e:
         print(f"[大盘] 板块资金失败: {type(e).__name__}: {e}")
     print(f"[大盘] 取到字段: {', '.join(k for k in mk if k != 'updated_at')}")
@@ -1159,6 +1161,21 @@ def export_latest():
 def upload_site():
     bucket = get_bucket()
     data = export_latest()
+    # 大盘接口偶尔取不到时, 沿用上一次成功的数据, 并保留它自己的采集时间, 前端会如实标注
+    try:
+        prev = json.loads(bucket.get_object(SITE_PREFIX + "latest.json").read()).get("market") or {}
+        mk = data.setdefault("market", {})
+        if not mk.get("indices") and prev.get("indices"):
+            for k in ("indices", "up", "down", "flat", "turnover", "idx_at"):
+                if k in prev:
+                    mk[k] = prev[k]
+            print("[大盘] 指数取数失败, 沿用上一次的数据")
+        if not mk.get("flow_in") and prev.get("flow_in"):
+            for k in ("flow_in", "flow_out", "flow_at"):
+                if k in prev:
+                    mk[k] = prev[k]
+    except Exception as e:
+        print(f"[大盘] 读取上一次数据失败: {type(e).__name__}: {e}")
     bucket.put_object(
         SITE_PREFIX + "latest.json",
         json.dumps(data, ensure_ascii=False).encode("utf-8"),
