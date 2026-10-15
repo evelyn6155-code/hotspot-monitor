@@ -176,6 +176,61 @@ def _em_extras(rows, kind):
     return res
 
 
+def fetch_em_board(cfg):
+    """东方财富行业/概念板块: 热度榜 + 涨跌幅/涨停家数/领涨股 (push2) + 关联热点新闻。"""
+    import uuid
+    r = requests.get("https://datacenter.eastmoney.com/securities/api/data/v1/get", params={
+        "reportName": "RPT_BOARD_BOARDHOTSCORE", "columns": "ALL", "source": "SECURITIES",
+        "client": "APP", "pageNumber": 1, "pageSize": 100, "sortColumns": "HOT_RANK",
+        "sortTypes": 1, "filter": f'(BOARD_TYPE_NEW="{cfg["board_type"]}")'},
+        headers={"User-Agent": UA}, timeout=20)
+    r.raise_for_status()
+    data = ((r.json().get("result") or {}).get("data")) or []
+    codes = [d["NEW_BOARD_CODE"] for d in data]
+    quotes = {}
+    secids = ",".join("90." + c for c in codes)
+    for host in ("push2.eastmoney.com", "push2delay.eastmoney.com", "82.push2.eastmoney.com"):
+        try:
+            qr = requests.get(f"https://{host}/api/qt/ulist.np/get", params={
+                "fltt": 2, "invt": 2, "fields": "f3,f12,f14,f128,f136,f437",
+                "ut": "bd1d9ddb04089700cf9c27f6f7426281", "secids": secids},
+                headers={"User-Agent": UA}, timeout=15)
+            for d in ((qr.json().get("data") or {}).get("diff")) or []:
+                quotes[d["f12"]] = d
+            print(f"[{cfg['label']}] 行情 {host}: {len(quotes)}/{len(codes)}")
+            if quotes:
+                break
+        except Exception as e:
+            print(f"[{cfg['label']}] 行情 {host} 失败: {type(e).__name__}: {e}")
+    news = {}
+    try:
+        parm = json.dumps({"deviceid": uuid.uuid4().hex.upper(), "version": "180",
+                           "product": "EastMoney", "plat": "Android", "gubaCode": ",".join(codes)})
+        nr = requests.post("https://emstockdiag.eastmoney.com/apistock/Tran/GetData",
+                           json={"path": "newtopic/api/Topic/GubaCodeHotTopicNewRead", "parm": parm},
+                           headers={"User-Agent": UA}, timeout=20)
+        for k, lst in ((json.loads(nr.json().get("RData") or "{}").get("re")) or {}).items():
+            if lst:
+                news[k] = {"title": lst[0].get("name"), "summary": lst[0].get("summary")}
+        print(f"[{cfg['label']}] 关联热点 {len(news)} 个")
+    except Exception as e:
+        print(f"[{cfg['label']}] 关联热点失败: {type(e).__name__}: {e}")
+    out = []
+    for d in data:
+        c = d["NEW_BOARD_CODE"]
+        q = quotes.get(c) or {}
+        ex = {"pct": q.get("f3"), "limitup": q.get("f437"),
+              "leader": ({"name": q.get("f128"), "pct": q.get("f136")} if q.get("f128") else None),
+              "news": news.get(c)}
+        out.append({"title": d["BOARD_NAME"], "id": c,
+                    "url": f"https://quote.eastmoney.com/bk/90.{c}.html",
+                    "hot": d.get("HOT_SCORE"), "extra": ex})
+    return out
+
+
+EM_SEARCH = "https://so.eastmoney.com/web/s?keyword="
+
+
 def fetch_em_topic(cfg):
     """东方财富热门话题 (股吧话题, JSONP 接口去掉 callback 即返回 JSON)。"""
     u = ("https://gbapi.eastmoney.com/newctopic/topic/HomeTopicRead?deviceid=web&version=100"
@@ -184,7 +239,10 @@ def fetch_em_topic(cfg):
     txt = r.text.strip()
     m = re.match(r"^[\w$.]+\((.*)\)\s*;?$", txt, re.S)
     j = json.loads(m.group(1) if m else txt)
-    return {"re": j.get("re") or []}
+    lst = j.get("re") or []
+    for t in lst:
+        t["_url"] = EM_SEARCH + quote(str(t.get("name", "")))
+    return {"re": lst}
 
 
 def fetch_em_theme(cfg):
@@ -196,7 +254,10 @@ def fetch_em_theme(cfg):
     r = requests.post("https://emcfgdata.eastmoney.com/api/themeInvest/getHotBD",
                       json=body, headers={"User-Agent": UA}, timeout=20)
     r.raise_for_status()
-    return r.json()
+    j = r.json()
+    for t in (j.get("data") or []):
+        t["_url"] = EM_SEARCH + quote(str(t.get("themeName", "")))
+    return j
 
 
 def fetch_xq(cfg):
@@ -238,7 +299,7 @@ def fetch_douyin(cfg):
         raise last
     return {}
 
-FETCHERS = {"douyin": fetch_douyin, "em_topic": fetch_em_topic, "em_theme": fetch_em_theme, "em_rank": fetch_em_rank, "xq": fetch_xq}
+FETCHERS = {"em_board": fetch_em_board, "douyin": fetch_douyin, "em_topic": fetch_em_topic, "em_theme": fetch_em_theme, "em_rank": fetch_em_rank, "xq": fetch_xq}
 
 STD_FIELDS = {"title": "title", "url": "url", "id": "id", "hot": "hot"}
 
@@ -386,34 +447,28 @@ SOURCES = {
     },
     "em_board_industry": {
         "label": "东方财富·行业板块", "site": "东方财富", "sub": "热门板块", "sub2": "行业",
-        "enabled": True,
-        "url": "https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_BOARD_BOARDHOTSCORE&columns=ALL&filter=(BOARD_TYPE_NEW%3D%222%22)&source=SECURITIES&pageNumber=1&pageSize=100&client=APP&sortColumns=HOT_RANK&sortTypes=1",
-        "list_path": "result.data",
-        "fields": {"title": "BOARD_NAME", "url": None, "id": "BOARD_CODE", "hot": "HOT_SCORE"},
-        "url_template": "https://quote.eastmoney.com/bk/90.{id}.html",
+        "enabled": True, "fetcher": "em_board", "board_type": "2",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
         "ranked": True,
     },
     "em_board_concept": {
         "label": "东方财富·概念板块", "site": "东方财富", "sub": "热门板块", "sub2": "概念",
-        "enabled": True,
-        "url": "https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_BOARD_BOARDHOTSCORE&columns=ALL&filter=(BOARD_TYPE_NEW%3D%223%22)&source=SECURITIES&pageNumber=1&pageSize=100&client=APP&sortColumns=HOT_RANK&sortTypes=1",
-        "list_path": "result.data",
-        "fields": {"title": "BOARD_NAME", "url": None, "id": "BOARD_CODE", "hot": "HOT_SCORE"},
-        "url_template": "https://quote.eastmoney.com/bk/90.{id}.html",
+        "enabled": True, "fetcher": "em_board", "board_type": "3",
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
         "ranked": True,
     },
     "em_theme": {
         "label": "东方财富·题材", "site": "东方财富", "sub": "热门板块", "sub2": "题材",
         "enabled": True, "fetcher": "em_theme",
         "list_path": "data",
-        "fields": {"title": "themeName", "url": None, "id": "themeCode", "hot": "hotRankScore"},
+        "fields": {"title": "themeName", "url": "_url", "id": "themeCode", "hot": "hotRankScore"},
         "ranked": True,
     },
     "em_topic": {
         "label": "东方财富·热门话题", "site": "东方财富", "sub": "热门话题",
         "enabled": True, "fetcher": "em_topic",
         "list_path": "re",
-        "fields": {"title": "name", "url": None, "id": "topicid", "hot": "clickCount"},
+        "fields": {"title": "name", "url": "_url", "id": "topicid", "hot": "clickCount"},
         "ranked": True,
     },
     "ths_hour": {
