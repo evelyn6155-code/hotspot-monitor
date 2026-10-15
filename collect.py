@@ -1010,12 +1010,57 @@ MERGE_SOURCES = {          # source id -> (平台名, 权重, 是否财经原生
     "em_topic": ("东财话题", 0.8, True),
     "ths_topic": ("同花顺话题", 0.8, True),
 }
-FIN_KEYWORDS = ["A股", "港股", "美股", "股市", "股价", "股票", "基金", "债", "利率", "降息", "加息", "央行",
-                "美联储", "通胀", "CPI", "GDP", "关税", "汇率", "人民币", "美元", "黄金", "原油", "油价",
-                "财政", "IPO", "上市", "并购", "财报", "业绩", "涨停", "跌停", "芯片", "半导体", "光模块",
-                "新能源", "经济", "银行", "券商", "房地产", "楼市", "房价", "理财", "保险", "出口", "进口",
-                "证监会", "融资", "市值", "营收", "净利", "算力", "大模型", "OpenAI", "英伟达", "特斯拉",
-                "茅台", "华为", "小米", "苹果", "增值税", "退税", "养老金", "消费", "稀土", "碳酸锂"]
+# 强财经词: 命中即判为财经 (可在 finance_rules.json 里用 add 追加, block 屏蔽)
+FIN_KEYWORDS = [
+    "A股", "港股", "美股", "股市", "股价", "股票", "股指", "大盘", "沪指", "深成指", "创业板", "科创板", "北交所",
+    "恒生", "纳指", "道指", "标普", "日经", "基金", "ETF", "债市", "债券", "国债", "美债", "债务", "收益率",
+    "利率", "降息", "加息", "降准", "央行", "美联储", "通胀", "CPI", "PPI", "PMI", "GDP", "关税", "汇率",
+    "人民币", "美元", "日元", "欧元", "黄金", "白银", "原油", "油价", "成品油", "铜价", "碳酸锂", "稀土", "期货",
+    "涨停", "跌停", "财政", "发改委", "证监会", "金融监管", "国资委", "IPO", "上市公司", "并购", "重组", "财报",
+    "业绩", "净利", "营收", "市值", "估值", "融资", "减持", "增持", "回购", "分红", "退市", "做空", "牛市", "熊市",
+    "泡沫", "银行", "券商", "保险", "房地产", "楼市", "房价", "贷款", "贴息", "公积金", "理财", "出口", "退税",
+    "增值税", "养老金", "个税", "芯片", "半导体", "光模块", "算力", "大模型", "新能源", "光伏", "锂电", "储能",
+    "存款", "信贷", "社融", "外汇", "外储", "加密货币", "比特币", "稳定币", "私募", "公募", "险资", "北向资金",
+    "主力资金", "资金流", "两融", "转债", "科技股", "白酒股", "题材股", "概念股", "金融委", "财政部", "商务部",
+]
+# 弱相关词: 只是公司/品牌/泛消费词, 单独命中不算财经重点
+WEAK_KEYWORDS = ["苹果", "特斯拉", "华为", "小米", "英伟达", "OpenAI", "消费", "上市", "进口", "机器人", "新车"]
+RULES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "finance_rules.json")
+
+
+def load_rules():
+    try:
+        with open(RULES_FILE, encoding="utf-8") as f:
+            r = json.load(f)
+        return [str(x) for x in r.get("add", []) if x], [str(x) for x in r.get("block", []) if x]
+    except Exception:
+        return [], []
+
+
+def fetch_listed_names():
+    """从东方财富取全部 A股/港股/美股公司简称, 用来识别标题里出现的上市公司。失败时返回空集合, 不影响主流程。"""
+    names = set()
+    for label, fs in (("A股", "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048"),
+                      ("港股", "m:116+t:3,m:116+t:4,m:116+t:1,m:116+t:2"),
+                      ("美股", "m:105,m:106,m:107")):
+        try:
+            j = _get_json("https://push2.eastmoney.com/api/qt/clist/get", {
+                "pn": 1, "pz": 6000, "po": 1, "np": 1, "fltt": 2, "invt": 2, "fid": "f3",
+                "fs": fs, "fields": "f14", "ut": EM_UT}, tries=2)
+            diff = (j.get("data") or {}).get("diff") or []
+            if isinstance(diff, dict):
+                diff = list(diff.values())
+            got = 0
+            for d in diff:
+                n = re.sub(r"^(\*?ST|XD|XR|DR|N|C)", "", str(d.get("f14", "")).strip())
+                n = re.sub(r"(-[A-Z]+|\s.*)$", "", n)
+                if len(n) >= 3:
+                    names.add(n)
+                    got += 1
+            print(f"[合并榜] {label} 公司简称 {got} 个")
+        except Exception as e:
+            print(f"[合并榜] {label} 公司简称获取失败: {type(e).__name__}: {e}")
+    return names
 
 
 def _bigrams(t):
@@ -1033,10 +1078,15 @@ def _sim(a, b):
     return max(dice, contain * 0.85 if ok else 0.0)
 
 
+FIN_LIMIT, OTHER_LIMIT = 30, 10
+
+
 def build_merged(sources):
     by_id = {s["id"]: s for s in sources}
     now = datetime.now(CST)
-    # 财经词表: 板块/题材/个股名称
+    add_kw, block_kw = load_rules()
+    market_kw = FIN_KEYWORDS + add_kw
+    # 财经词表: 板块/题材/个股名称 + 全部上市公司简称
     vocab = {}
     for sid in ("em_board_industry", "em_board_concept", "em_theme", "ths_plate_concept", "ths_plate_industry"):
         for it in (by_id.get(sid) or {}).get("items", []):
@@ -1048,6 +1098,12 @@ def build_merged(sources):
             t = re.sub(r"\(.*?\)$", "", it["title"] or "").strip()
             if len(t) >= 3 and not t.startswith("N"):
                 vocab.setdefault(t, "stock")
+    try:
+        for n in fetch_listed_names():
+            vocab.setdefault(n, "stock")
+    except Exception as e:
+        print(f"[合并榜] 上市公司名单失败: {type(e).__name__}: {e}")
+    vocab_sorted = sorted(vocab.items(), key=lambda kv: -len(kv[0]))
     fin_titles = {it["title"] for it in (by_id.get("toutiao") or {}).get("items", [])}
 
     cands = []
@@ -1055,12 +1111,13 @@ def build_merged(sources):
         src = by_id.get(sid)
         if not src:
             continue
+        n_items = max(len(src["items"]), 1)
         for it in src["items"]:
             if not it.get("title"):
                 continue
             cands.append({"title": it["title"].strip(), "bg": _bigrams(it["title"]), "site": plat, "sid": sid,
                           "rank": it.get("rank"), "url": it.get("url"), "first": it.get("first_seen"),
-                          "w": w, "native": native or it["title"] in fin_titles})
+                          "w": w, "len": n_items, "native": native or it["title"] in fin_titles})
     cands.sort(key=lambda c: (c["rank"] or 999))
     clusters = []
     for c in cands:
@@ -1081,17 +1138,21 @@ def build_merged(sources):
         ms.sort(key=lambda m: (m["rank"] or 999))
         head = ms[0]
         title = head["title"]                  # 代表标题: 各平台中排名最靠前的那条
-        score = sum(m["w"] * (101 - (m["rank"] or 100)) / 100 for m in ms) + 0.6 * (len(ms) - 1)
+        # 名次按各自榜单长度折算成 0-1 (榜首 1, 榜尾接近 0), 再乘平台权重
+        score = sum(m["w"] * (1 - ((m["rank"] or m["len"]) - 1) / m["len"]) for m in ms)
         firsts = [m["first"] for m in ms if m["first"]]
         first = min(firsts) if firsts else None
         text = " ".join(m["title"] for m in ms)
         rel = []
-        for term, kind in sorted(vocab.items(), key=lambda kv: -len(kv[0])):
+        for term, kind in vocab_sorted:
             if term in text and not any(term in r["t"] or r["t"] in term for r in rel):
                 rel.append({"t": term, "k": kind})
             if len(rel) >= 3:
                 break
-        finance = any(m["native"] for m in ms) or bool(rel) or any(k in text for k in FIN_KEYWORDS)
+        blocked = any(k in text for k in block_kw)
+        strong = any(m["native"] for m in ms) or bool(rel) or any(k in text for k in market_kw)
+        finance = strong and not blocked
+        weak = (not finance) and not blocked and any(k in text for k in WEAK_KEYWORDS)
         is_new = False
         if first:
             try:
@@ -1099,11 +1160,18 @@ def build_merged(sources):
             except ValueError:
                 pass
         out.append({"title": title, "n": len(ms), "best": min((m["rank"] or 999) for m in ms),
-                    "score": round(score, 3), "finance": finance, "rel": rel, "first": first, "new": is_new,
+                    "score": round(score, 3), "finance": finance, "weak": weak, "rel": rel, "first": first,
+                    "new": is_new,
                     "members": [{"site": m["site"], "rank": m["rank"], "title": m["title"], "url": m["url"]} for m in ms]})
-    out.sort(key=lambda x: (-x["n"], not x["finance"], -x["score"]))
-    print(f"[合并榜] 候选 {len(cands)} 条 -> {len(out)} 个话题, 其中多平台 {sum(1 for x in out if x['n'] > 1)} 个, 财经相关 {sum(1 for x in out if x['finance'])} 个")
-    return out[:200]
+    # 两段: 财经重点按命中平台数排 (同数再按分数), 其他跨平台热点只收非财经且至少 2 个平台上榜的话题
+    fin = sorted([x for x in out if x["finance"]], key=lambda x: (-x["n"], -x["score"]))[:FIN_LIMIT]
+    oth = sorted([x for x in out if not x["finance"] and x["n"] >= 2], key=lambda x: (-x["n"], -x["score"]))[:OTHER_LIMIT]
+    for x in fin:
+        x["sec"] = "fin"
+    for x in oth:
+        x["sec"] = "oth"
+    print(f"[合并榜] 候选 {len(cands)} 条 -> {len(out)} 个话题, 财经重点 {len(fin)} 个 (其中多平台 {sum(1 for x in fin if x['n'] > 1)}), 其他跨平台 {len(oth)} 个")
+    return fin + oth
 
 
 def export_latest():
