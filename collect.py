@@ -114,7 +114,29 @@ def fetch_xq(cfg):
     return r.json()
 
 
-FETCHERS = {"em_rank": fetch_em_rank, "xq": fetch_xq}
+
+def fetch_douyin(cfg):
+    """抖音热榜: 依次尝试几个公开接口, 有 DOUYIN_COOKIE 时带上 (均未验证, 看日志)。"""
+    h = {"User-Agent": UA, "Referer": "https://www.douyin.com/"}
+    if os.environ.get("DOUYIN_COOKIE"):
+        h["Cookie"] = os.environ["DOUYIN_COOKIE"]
+    last = None
+    for u in cfg["dy_urls"]:
+        try:
+            r = requests.get(u, headers=h, timeout=20)
+            print(f"[抖音] {u.split('?')[0]} -> HTTP {r.status_code}, 开头 {r.text[:120]!r}")
+            j = r.json()
+            lst = dig(j, "word_list") or dig(j, "data.word_list")
+            if lst:
+                return {"word_list": lst}
+        except Exception as e:
+            last = e
+            print(f"[抖音] {u.split('?')[0]} 失败: {type(e).__name__}: {e}")
+    if last:
+        raise last
+    return {}
+
+FETCHERS = {"douyin": fetch_douyin, "em_rank": fetch_em_rank, "xq": fetch_xq}
 
 STD_FIELDS = {"title": "title", "url": "url", "id": "id", "hot": "hot"}
 
@@ -218,6 +240,19 @@ SOURCES = {
         "headers": {"Referer": "https://top.baidu.com/board?tab=finance"},
         "list_path": "data.cards.0.content.0.content",
         "fields": {"title": "word", "url": "url", "id": "word", "hot": None},
+        "ranked": True,
+    },
+    "douyin": {
+        "label": "抖音·热榜",
+        "site": "抖音", "sub": "热榜",
+        "enabled": True, "fetcher": "douyin",
+        "dy_urls": [
+            "https://www.iesdouyin.com/web/api/v2/hotsearch/billboard/word/",
+            "https://aweme.snssdk.com/aweme/v1/hot/search/list/?detail_list=1&aid=1128",
+            "https://www.douyin.com/aweme/v1/web/hot/search/list/?device_platform=webapp&aid=6383&channel=channel_pc_web&detail_list=1",
+        ],
+        "list_path": "word_list",
+        "fields": {"title": "word", "url": None, "id": "word", "hot": "hot_value"},
         "ranked": True,
     },
     "em_rank": {
