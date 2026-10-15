@@ -39,6 +39,15 @@ li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
 .sub{color:var(--sub);font-size:12px;margin-top:2px}
 .badge{display:inline-block;background:var(--new);color:#fff;font-size:11px;padding:0 5px;border-radius:3px;margin-left:6px;vertical-align:1px}
 .empty,.err{color:var(--sub);text-align:center;padding:40px 0}
+
+.px{margin-top:3px;font-size:13px;font-variant-numeric:tabular-nums}
+.up{color:#e5322d}.dn{color:#1a9d58}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
+.chip{font-size:12px;padding:1px 7px;border-radius:4px;background:#e8f0fb;color:#2a6cc4}
+.chip.feat{background:#fdebe3;color:#d9541e}
+.news{margin-top:6px;padding:6px 8px;border-radius:6px;background:var(--tab);font-size:12px;color:var(--sub);line-height:1.5}
+.news b{color:var(--accent);font-weight:600;margin-right:6px}
+.news .nt{color:var(--text)}
 </style>
 </head>
 <body>
@@ -133,7 +142,25 @@ li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
       if(it.new){var nb=document.createElement('span');nb.className='badge';nb.textContent='新';bd.appendChild(nb);}
       var parts=[]; var h=fmtHot(it.hot); if(h) parts.push('热度 '+h);
       if(it.pub) parts.push('发布 '+it.pub.slice(5,16)); else if(it.first_seen) parts.push('采集到 '+it.first_seen.slice(5,16));
-      if(parts.length){var sub=document.createElement('div');sub.className='sub';sub.textContent=parts.join(' · ');bd.appendChild(sub);}
+      var ex=it.extra;
+      if(ex&&(ex.price!=null||ex.pct!=null)){
+        var px=document.createElement('div');px.className='px '+((ex.pct||0)>0?'up':(ex.pct||0)<0?'dn':'');
+        px.textContent=(ex.price!=null?ex.price+'  ':'')+(ex.pct!=null?((ex.pct>0?'+':'')+ex.pct.toFixed(2)+'%'):'');
+        bd.appendChild(px);
+      }
+      if(ex&&ex.tags&&ex.tags.length){
+        var cs=document.createElement('div');cs.className='chips';
+        ex.tags.forEach(function(t){var c=document.createElement('span');c.className='chip'+(t.k==='feat'?' feat':'');c.textContent=t.t;cs.appendChild(c);});
+        bd.appendChild(cs);
+      }
+      if(ex&&ex.news&&ex.news.title){
+        var nw=document.createElement('div');nw.className='news';
+        var b=document.createElement('b');b.textContent='热点';nw.appendChild(b);
+        var nt=document.createElement('span');nt.className='nt';nt.textContent=ex.news.title;nw.appendChild(nt);
+        if(ex.news.summary){var sm=document.createElement('div');sm.textContent=ex.news.summary;nw.appendChild(sm);}
+        bd.appendChild(nw);
+      }
+      if(parts.length&&!ex){var sub=document.createElement('div');sub.className='sub';sub.textContent=parts.join(' · ');bd.appendChild(sub);}
       li.appendChild(rk);li.appendChild(bd);listEl.appendChild(li);
     });
   }

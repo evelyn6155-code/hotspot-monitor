@@ -64,7 +64,7 @@ PARSERS = {"weibo": parse_weibo, "jsonvar": parse_jsonvar}
 
 
 def _qt_names(syms):
-    """腾讯行情批量取名称与涨跌幅。syms 为腾讯代码 (sh600000/hk00700/usAAPL), 返回 {小写代码: (名称, 涨跌幅)}。"""
+    """腾讯行情批量取名称与涨跌幅。syms 为腾讯代码 (sh600000/hk00700/usAAPL), 返回 {小写代码: (名称, 涨跌幅, 现价)}。"""
     res = {}
     for i in range(0, len(syms), 50):
         t = requests.get("https://qt.gtimg.cn/q=" + ",".join(syms[i:i + 50]),
@@ -76,7 +76,7 @@ def _qt_names(syms):
                     pct = float(p[32])
                 except ValueError:
                     pct = None
-                res[m.group(1).lower().split(".")[0]] = (p[1], pct)
+                res[m.group(1).lower().split(".")[0]] = (p[1], pct, p[3])
     return res
 
 
@@ -108,12 +108,72 @@ def fetch_em_rank(cfg):
         print(f"[{cfg['label']}] 腾讯行情补全名称 {len(names)}/{len(items)}")
     except Exception as e:
         print(f"[{cfg['label']}] 取名称失败, 退回显示代码: {type(e).__name__}: {e}")
+    extras = {}
+    if cfg.get("market_type", "") in ("", "000003", "000004") and kind in ("a", "hk", "us"):
+        try:
+            extras = _em_extras(rows, kind)
+        except Exception as e:
+            print(f"[{cfg['label']}] 取标签/新闻失败: {type(e).__name__}: {e}")
     out = []
-    for code, tq, url in items:
-        nm, pct = names.get(tq.lower(), (None, None))
+    for (code, tq, url), x in zip(items, rows):
+        nm, pct, price = (names.get(tq.lower()) or (None, None, None))
+        ex = {"price": price, "pct": pct}
+        ex.update(extras.get(x["sc"], {}))
         out.append({"title": f"{nm}({code})" if nm else code, "url": url, "id": code,
-                    "hot": f"{pct}%" if pct is not None else None})
+                    "hot": f"{pct}%" if pct is not None else None, "extra": ex})
     return out
+
+
+def _em_extras(rows, kind):
+    """热股的附加信息: 特征标签 (GG)、板块标签 (BK)、关联热点新闻。返回 {sc: {tags, news}}。"""
+    res = {x["sc"]: {"tags": [], "news": None} for x in rows}
+    if kind == "a":
+        codes = ",".join(x["sc"] for x in rows)
+        base = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
+        for rn, kindname, lim in (("RPT_CUSTOM_INDIVIDUAL_SHARE_DIMENSIONALITY_GG", "feat", 2),
+                                  ("RPT_CUSTOM_INDIVIDUAL_SHARE_DIMENSIONALITY_BK", "board", 2)):
+            try:
+                r = requests.get(base, params={
+                    "reportName": rn, "columns": "ALL", "source": "SECURITIES", "client": "APP",
+                    "pageNumber": 1, "pageSize": 2000,
+                    "filter": f'(SECURITY_CODE_MK in ("{codes}"))'},
+                    headers={"User-Agent": UA}, timeout=20)
+                data = ((r.json().get("result") or {}).get("data")) or []
+                if kindname == "feat":
+                    data.sort(key=lambda d: (str(d.get("CLASSIF_CODE")), int(d.get("INDICATOR_NUM") or 0)))
+                cnt = {}
+                for d in data:
+                    k = d.get("SECURITY_CODE_MK")
+                    nm = d.get("INDICATOR_NAME") if kindname == "feat" else d.get("BOARD_NAME")
+                    if k in res and nm and cnt.get(k, 0) < lim:
+                        res[k]["tags"].append({"t": nm, "k": kindname})
+                        cnt[k] = cnt.get(k, 0) + 1
+                print(f"[东财热股] {kindname} 标签覆盖 {len(cnt)}/{len(rows)}")
+            except Exception as e:
+                print(f"[东财热股] {kindname} 标签失败: {type(e).__name__}: {e}")
+    try:     # 关联热点新闻
+        import uuid
+        if kind == "hk":
+            gc = ",".join("HK|" + x["sc"].split("|")[-1] for x in rows)
+        elif kind == "us":
+            gc = ",".join(x["sc"] for x in rows)
+        else:
+            gc = ",".join(x["sc"] for x in rows)
+        parm = json.dumps({"deviceid": uuid.uuid4().hex.upper(), "version": "180",
+                           "product": "EastMoney", "plat": "Android", "gubaCode": gc})
+        r = requests.post("https://emstockdiag.eastmoney.com/apistock/Tran/GetData",
+                          json={"path": "newtopic/api/Topic/GubaCodeHotTopicNewRead", "parm": parm},
+                          headers={"User-Agent": UA}, timeout=20)
+        re_ = (json.loads(r.json().get("RData") or "{}").get("re")) or {}
+        n = 0
+        for k, lst in re_.items():
+            if k in res and lst:
+                res[k]["news"] = {"title": lst[0].get("name"), "summary": lst[0].get("summary")}
+                n += 1
+        print(f"[东财热股] 关联热点 {n} 只")
+    except Exception as e:
+        print(f"[东财热股] 关联热点失败: {type(e).__name__}: {e}")
+    return res
 
 
 def fetch_em_topic(cfg):
@@ -300,28 +360,28 @@ SOURCES = {
     "em_rank": {
         "label": "东方财富·A股热股", "site": "东方财富", "sub": "热股", "sub2": "A股",
         "enabled": True, "fetcher": "em_rank", "kind": "a",
-        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot"},
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
         "ranked": True,
     },
     "em_rank_hk": {
         "label": "东方财富·港股热股", "site": "东方财富", "sub": "热股", "sub2": "港股",
         "enabled": True, "fetcher": "em_rank", "kind": "hk", "market_type": "000003",
         "em_url": "https://emappdata.eastmoney.com/stockrank/getAllCurrHkUsList",
-        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot"},
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
         "ranked": True,
     },
     "em_rank_us": {
         "label": "东方财富·美股热股", "site": "东方财富", "sub": "热股", "sub2": "美股",
         "enabled": True, "fetcher": "em_rank", "kind": "us", "market_type": "000004",
         "em_url": "https://emappdata.eastmoney.com/stockrank/getAllCurrHkUsList",
-        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot"},
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
         "ranked": True,
     },
     "em_etf": {
         "label": "东方财富·ETF人气榜", "site": "东方财富", "sub": "ETF",
         "enabled": True, "fetcher": "em_rank", "kind": "a", "market_type": "etf",
         "em_url": "https://emappdata.eastmoney.com/fundrank/getAllCurrentETFList",
-        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot"},
+        "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot", "extra": "extra"},
         "ranked": True,
     },
     "em_board_industry": {
@@ -659,7 +719,7 @@ def export_latest():
         if not last:
             continue
         rows = cur.execute(
-            "SELECT s.rank, s.hot, i.title, i.url, i.first_seen, i.seen_count, i.pub_time "
+            "SELECT s.rank, s.hot, i.title, i.url, i.first_seen, i.seen_count, i.pub_time, s.raw "
             "FROM snapshots s JOIN items i ON i.source=s.source AND i.fingerprint=s.fingerprint "
             "WHERE s.source=? AND s.captured_at=? "
             "ORDER BY COALESCE(s.rank, 9999), s.id", (name, last)).fetchall()
@@ -673,7 +733,8 @@ def export_latest():
             "captured_at": last,
             "rank_date": (cur.execute("SELECT note FROM meta WHERE source=?", (name,)).fetchone() or [None])[0],
             "items": [{"rank": r[0], "hot": r[1], "title": r[2], "url": r[3],
-                       "first_seen": r[4], "new": r[5] == 1, "pub": r[6]} for r in rows],
+                       "first_seen": r[4], "new": r[5] == 1, "pub": r[6],
+                       "extra": (json.loads(r[7]).get("extra") if r[7] else None)} for r in rows],
         })
     conn.close()
     def _key(x):
