@@ -923,6 +923,187 @@ def collect():
     conn.close()
 
 
+
+# ---------------------------------------------------------------------------
+# 大盘情绪: 指数/涨跌家数/涨停跌停/连板高度/成交额/板块资金 (东方财富公开接口, 每次导出时现取)
+# ---------------------------------------------------------------------------
+EM_UT = "bd1d9ddb04089700cf9c27f6f7426281"
+EM_POOL_UT = "7eea3edcaed734bea9cbfc24409ed989"
+
+
+def _get_json(url, params, tries=3, timeout=15):
+    last = None
+    for i in range(tries):
+        try:
+            r = requests.get(url, params=params, headers={"User-Agent": UA}, timeout=timeout)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            last = e
+            time.sleep(1)
+    raise last
+
+
+def fetch_market():
+    mk = {"updated_at": now_str()}
+    try:
+        j = _get_json("https://push2.eastmoney.com/api/qt/ulist.np/get", {
+            "fltt": 2, "invt": 2, "ut": EM_UT,
+            "fields": "f2,f3,f4,f6,f12,f14,f104,f105,f106",
+            "secids": "1.000001,0.399001,0.399006,1.000300"})
+        diff = (j.get("data") or {}).get("diff") or []
+        mk["indices"] = [{"name": d["f14"], "price": d["f2"], "pct": d["f3"], "chg": d["f4"]} for d in diff]
+        by = {d["f12"]: d for d in diff}
+        sh, sz = by.get("000001"), by.get("399001")
+        if sh and sz:
+            mk["up"] = (sh["f104"] or 0) + (sz["f104"] or 0)
+            mk["down"] = (sh["f105"] or 0) + (sz["f105"] or 0)
+            mk["flat"] = (sh["f106"] or 0) + (sz["f106"] or 0)
+            mk["turnover"] = round(((sh["f6"] or 0) + (sz["f6"] or 0)) / 1e8, 0)
+    except Exception as e:
+        print(f"[大盘] 指数/涨跌家数失败: {type(e).__name__}: {e}")
+    # 涨停池/跌停池: 非交易日回退到最近有数据的交易日
+    for back in range(0, 6):
+        d = (datetime.now(CST) - timedelta(days=back)).strftime("%Y%m%d")
+        try:
+            base = {"ut": EM_POOL_UT, "dpt": "wz.ztzt", "Pageindex": 0, "pagesize": 300,
+                    "sort": "fbt:asc", "date": d}
+            z = _get_json("https://push2ex.eastmoney.com/getTopicZTPool", base)
+            pool = (z.get("data") or {}).get("pool") or []
+            if not pool:
+                continue
+            mk["zt"] = (z["data"].get("tc") or len(pool))
+            mx = max(p.get("lbc") or 1 for p in pool)
+            mk["lb_high"] = mx
+            mk["lb_names"] = [p["n"] for p in pool if (p.get("lbc") or 1) == mx][:3]
+            mk["pool_date"] = d
+            base["sort"] = "fund:asc"
+            dz = _get_json("https://push2ex.eastmoney.com/getTopicDTPool", base)
+            mk["dt"] = (dz.get("data") or {}).get("tc")
+            break
+        except Exception as e:
+            print(f"[大盘] 涨跌停池 {d} 失败: {type(e).__name__}: {e}")
+    try:
+        for key, po in (("flow_in", 1), ("flow_out", 0)):
+            j = _get_json("https://push2.eastmoney.com/api/qt/clist/get", {
+                "pn": 1, "pz": 3, "po": po, "np": 1, "fltt": 2, "invt": 2, "fid": "f62",
+                "fs": "m:90+t:2", "fields": "f12,f14,f3,f62", "ut": EM_UT})
+            diff = (j.get("data") or {}).get("diff") or []
+            mk[key] = [{"name": d["f14"], "amt": round((d["f62"] or 0) / 1e8, 1), "pct": d["f3"]} for d in diff]
+    except Exception as e:
+        print(f"[大盘] 板块资金失败: {type(e).__name__}: {e}")
+    print(f"[大盘] 取到字段: {', '.join(k for k in mk if k != 'updated_at')}")
+    return mk
+
+
+# ---------------------------------------------------------------------------
+# 全网热点: 把各平台的话题类榜单按标题相似度合并, 并关联板块/个股
+# ---------------------------------------------------------------------------
+MERGE_SOURCES = {          # source id -> (平台名, 权重, 是否财经原生榜)
+    "weibo": ("微博", 1.0, False),
+    "douyin": ("抖音", 1.0, False),
+    "toutiao_all": ("今日头条", 1.0, False),
+    "baidu_finance": ("百度财经", 1.0, True),
+    "wscn_hot_day": ("华尔街见闻", 0.8, True),
+    "em_topic": ("东财话题", 0.8, True),
+    "ths_topic": ("同花顺话题", 0.8, True),
+}
+FIN_KEYWORDS = ["A股", "港股", "美股", "股市", "股价", "股票", "基金", "债", "利率", "降息", "加息", "央行",
+                "美联储", "通胀", "CPI", "GDP", "关税", "汇率", "人民币", "美元", "黄金", "原油", "油价",
+                "财政", "IPO", "上市", "并购", "财报", "业绩", "涨停", "跌停", "芯片", "半导体", "光模块",
+                "新能源", "经济", "银行", "券商", "房地产", "楼市", "房价", "理财", "保险", "出口", "进口",
+                "证监会", "融资", "市值", "营收", "净利", "算力", "大模型", "OpenAI", "英伟达", "特斯拉",
+                "茅台", "华为", "小米", "苹果", "增值税", "退税", "养老金", "消费", "稀土", "碳酸锂"]
+
+
+def _bigrams(t):
+    t = re.sub(r"[\s\W_]+", "", str(t), flags=re.UNICODE).lower()
+    return {t[i:i + 2] for i in range(len(t) - 1)} if len(t) > 1 else {t}
+
+
+def _sim(a, b):
+    inter = len(a & b)
+    if inter < 3:
+        return 0.0
+    dice = 2 * inter / (len(a) + len(b))
+    contain = inter / min(len(a), len(b))
+    ok = contain >= 0.7 or (contain >= 0.6 and inter >= 4)
+    return max(dice, contain * 0.85 if ok else 0.0)
+
+
+def build_merged(sources):
+    by_id = {s["id"]: s for s in sources}
+    now = datetime.now(CST)
+    # 财经词表: 板块/题材/个股名称
+    vocab = {}
+    for sid in ("em_board_industry", "em_board_concept", "em_theme", "ths_plate_concept", "ths_plate_industry"):
+        for it in (by_id.get(sid) or {}).get("items", []):
+            t = (it["title"] or "").strip()
+            if len(t) >= 3:
+                vocab[t] = "board"
+    for sid in ("em_rank", "ths_a_hour", "ths_a_day"):
+        for it in (by_id.get(sid) or {}).get("items", []):
+            t = re.sub(r"\(.*?\)$", "", it["title"] or "").strip()
+            if len(t) >= 3 and not t.startswith("N"):
+                vocab.setdefault(t, "stock")
+    fin_titles = {it["title"] for it in (by_id.get("toutiao") or {}).get("items", [])}
+
+    cands = []
+    for sid, (plat, w, native) in MERGE_SOURCES.items():
+        src = by_id.get(sid)
+        if not src:
+            continue
+        for it in src["items"]:
+            if not it.get("title"):
+                continue
+            cands.append({"title": it["title"].strip(), "bg": _bigrams(it["title"]), "site": plat, "sid": sid,
+                          "rank": it.get("rank"), "url": it.get("url"), "first": it.get("first_seen"),
+                          "w": w, "native": native or it["title"] in fin_titles})
+    cands.sort(key=lambda c: (c["rank"] or 999))
+    clusters = []
+    for c in cands:
+        best, best_s = None, 0.0
+        for cl in clusters:
+            if any(m["sid"] == c["sid"] for m in cl["members"]):
+                continue                      # 同一榜单内的条目不合并
+            sc = max(_sim(c["bg"], m["bg"]) for m in cl["members"])
+            if sc > best_s:
+                best, best_s = cl, sc
+        if best is not None and best_s >= 0.5:
+            best["members"].append(c)
+        else:
+            clusters.append({"members": [c]})
+    out = []
+    for cl in clusters:
+        ms = cl["members"]
+        ms.sort(key=lambda m: (m["rank"] or 999))
+        head = ms[0]
+        title = head["title"]                  # 代表标题: 各平台中排名最靠前的那条
+        score = sum(m["w"] * (101 - (m["rank"] or 100)) / 100 for m in ms) + 0.6 * (len(ms) - 1)
+        firsts = [m["first"] for m in ms if m["first"]]
+        first = min(firsts) if firsts else None
+        text = " ".join(m["title"] for m in ms)
+        rel = []
+        for term, kind in sorted(vocab.items(), key=lambda kv: -len(kv[0])):
+            if term in text and not any(term in r["t"] or r["t"] in term for r in rel):
+                rel.append({"t": term, "k": kind})
+            if len(rel) >= 3:
+                break
+        finance = any(m["native"] for m in ms) or bool(rel) or any(k in text for k in FIN_KEYWORDS)
+        is_new = False
+        if first:
+            try:
+                is_new = (now - datetime.strptime(first, "%Y-%m-%d %H:%M:%S").replace(tzinfo=CST)).total_seconds() < 3600 * 2
+            except ValueError:
+                pass
+        out.append({"title": title, "n": len(ms), "best": min((m["rank"] or 999) for m in ms),
+                    "score": round(score, 3), "finance": finance, "rel": rel, "first": first, "new": is_new,
+                    "members": [{"site": m["site"], "rank": m["rank"], "title": m["title"], "url": m["url"]} for m in ms]})
+    out.sort(key=lambda x: (-x["n"], -x["score"]))
+    print(f"[合并榜] 候选 {len(cands)} 条 -> {len(out)} 个话题, 其中多平台 {sum(1 for x in out if x['n'] > 1)} 个, 财经相关 {sum(1 for x in out if x['finance'])} 个")
+    return out[:150]
+
+
 def export_latest():
     """把每个源最近一次采集的榜单导出成 JSON, 供前端读取。"""
     conn = sqlite3.connect(DB_PATH)
@@ -962,6 +1143,16 @@ def export_latest():
         s2 = SUB2_ORDER.index(x.get("sub2")) if x.get("sub2") in SUB2_ORDER else 0
         return (si, sb, s2)
     out["sources"].sort(key=_key)   # 稳定排序, 同一网站内保持原来的先后
+    try:
+        out["merged"] = build_merged(out["sources"])
+    except Exception as e:
+        print(f"[合并榜] 失败: {type(e).__name__}: {e}")
+        out["merged"] = []
+    try:
+        out["market"] = fetch_market()
+    except Exception as e:
+        print(f"[大盘] 失败: {type(e).__name__}: {e}")
+        out["market"] = {}
     return out
 
 

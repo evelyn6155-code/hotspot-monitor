@@ -2,8 +2,13 @@ name: caiji
 
 on:
   schedule:
-    - cron: '*/5 1-7 * * 1-5'
+    - cron: '*/15 0-12 * * 1-5'   # 工作日北京时间 08:00-20:45, 每 15 分钟
+    - cron: '7 */2 * * *'         # 其余时间每 2 小时一次
   workflow_dispatch:
+
+concurrency:
+  group: caiji
+  cancel-in-progress: false
 
 jobs:
   collect:
