@@ -22,7 +22,8 @@ h1{margin:0;font-size:18px}
 .tab{flex:none;border:0;background:var(--tab);color:var(--text);padding:6px 14px;border-radius:16px;font-size:14px;cursor:pointer}
 .tab.on{background:var(--accent);color:#fff}
 #subs{display:flex;gap:6px;margin-top:8px;overflow-x:auto}
-#subs:empty{display:none}
+#subs:empty,#subs2:empty{display:none}
+#subs2{display:flex;gap:6px;margin-top:4px;overflow-x:auto}
 .sub-tab{flex:none;border:0;border-bottom:2px solid transparent;background:none;color:var(--sub);padding:4px 10px;font-size:13px;cursor:pointer}
 .sub-tab.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
 main{max-width:860px;margin:0 auto;padding:12px 16px 40px}
@@ -45,6 +46,7 @@ li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
   <div class="top"><h1>财经热点监测</h1><span id="updated">加载中…</span></div>
   <div id="tabs"></div>
   <div id="subs"></div>
+  <div id="subs2"></div>
 </header>
 <main>
   <div class="meta" id="meta"></div>
@@ -55,7 +57,7 @@ li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
 <script>
 (function(){
   var state={data:null,cur:null};
-  var tabsEl=document.getElementById('tabs'),subsEl=document.getElementById('subs'),listEl=document.getElementById('list'),
+  var tabsEl=document.getElementById('tabs'),subsEl=document.getElementById('subs'),subs2El=document.getElementById('subs2'),listEl=document.getElementById('list'),
       metaEl=document.getElementById('meta'),updEl=document.getElementById('updated'),
       emptyEl=document.getElementById('empty'),errEl=document.getElementById('err');
 
@@ -85,7 +87,7 @@ li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
   function renderTabs(){
     var g=sites(), curSrc=state.data.sources.filter(function(x){return x.id===state.cur;})[0];
     var curSite=curSrc?(curSrc.site||curSrc.label):g.order[0];
-    tabsEl.textContent='';subsEl.textContent='';
+    tabsEl.textContent='';subsEl.textContent='';subs2El.textContent='';
     g.order.forEach(function(k){
       var b=document.createElement('button');
       b.className='tab'+(k===curSite?' on':''); b.textContent=k;
@@ -93,12 +95,24 @@ li.ranked:nth-child(-n+3) .rk{color:var(--accent);font-weight:700}
       tabsEl.appendChild(b);
     });
     var list=g.map[curSite]||[];
-    if(list.length>1){
-      list.forEach(function(s){
+    var subOrder=[],subMap={};
+    list.forEach(function(s){var k=s.sub||s.label; if(!subMap[k]){subMap[k]=[];subOrder.push(k);} subMap[k].push(s);});
+    var curSub=curSrc?(curSrc.sub||curSrc.label):subOrder[0];
+    if(subOrder.length>1){
+      subOrder.forEach(function(k){
         var b=document.createElement('button');
-        b.className='sub-tab'+(s.id===state.cur?' on':''); b.textContent=s.sub||s.label;
-        b.onclick=function(){state.cur=s.id;renderTabs();renderList();};
+        b.className='sub-tab'+(k===curSub?' on':''); b.textContent=k;
+        b.onclick=function(){state.cur=subMap[k][0].id;renderTabs();renderList();};
         subsEl.appendChild(b);
+      });
+    }
+    var l2=subMap[curSub]||[];
+    if(l2.length>1){
+      l2.forEach(function(s){
+        var b=document.createElement('button');
+        b.className='sub-tab'+(s.id===state.cur?' on':''); b.textContent=s.sub2||s.label;
+        b.onclick=function(){state.cur=s.id;renderTabs();renderList();};
+        subs2El.appendChild(b);
       });
     }
   }

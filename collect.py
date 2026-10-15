@@ -296,20 +296,20 @@ SOURCES = {
         "ranked": True,
     },
     "em_rank": {
-        "label": "东方财富·A股热股", "site": "东方财富", "sub": "热股·A股",
+        "label": "东方财富·A股热股", "site": "东方财富", "sub": "热股", "sub2": "A股",
         "enabled": True, "fetcher": "em_rank", "kind": "a",
         "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot"},
         "ranked": True,
     },
     "em_rank_hk": {
-        "label": "东方财富·港股热股", "site": "东方财富", "sub": "热股·港股",
+        "label": "东方财富·港股热股", "site": "东方财富", "sub": "热股", "sub2": "港股",
         "enabled": True, "fetcher": "em_rank", "kind": "hk", "market_type": "000003",
         "em_url": "https://emappdata.eastmoney.com/stockrank/getAllCurrHkUsList",
         "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot"},
         "ranked": True,
     },
     "em_rank_us": {
-        "label": "东方财富·美股热股", "site": "东方财富", "sub": "热股·美股",
+        "label": "东方财富·美股热股", "site": "东方财富", "sub": "热股", "sub2": "美股",
         "enabled": True, "fetcher": "em_rank", "kind": "us", "market_type": "000004",
         "em_url": "https://emappdata.eastmoney.com/stockrank/getAllCurrHkUsList",
         "list_path": "", "fields": {"title": "title", "url": "url", "id": "id", "hot": "hot"},
@@ -323,7 +323,7 @@ SOURCES = {
         "ranked": True,
     },
     "em_board_industry": {
-        "label": "东方财富·行业板块", "site": "东方财富", "sub": "板块·行业",
+        "label": "东方财富·行业板块", "site": "东方财富", "sub": "热门板块", "sub2": "行业",
         "enabled": True,
         "url": "https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_BOARD_BOARDHOTSCORE&columns=ALL&filter=(BOARD_TYPE_NEW%3D%222%22)&source=SECURITIES&pageNumber=1&pageSize=100&client=APP&sortColumns=HOT_RANK&sortTypes=1",
         "list_path": "result.data",
@@ -332,7 +332,7 @@ SOURCES = {
         "ranked": True,
     },
     "em_board_concept": {
-        "label": "东方财富·概念板块", "site": "东方财富", "sub": "板块·概念",
+        "label": "东方财富·概念板块", "site": "东方财富", "sub": "热门板块", "sub2": "概念",
         "enabled": True,
         "url": "https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_BOARD_BOARDHOTSCORE&columns=ALL&filter=(BOARD_TYPE_NEW%3D%223%22)&source=SECURITIES&pageNumber=1&pageSize=100&client=APP&sortColumns=HOT_RANK&sortTypes=1",
         "list_path": "result.data",
@@ -341,7 +341,7 @@ SOURCES = {
         "ranked": True,
     },
     "em_theme": {
-        "label": "东方财富·题材", "site": "东方财富", "sub": "板块·题材",
+        "label": "东方财富·题材", "site": "东方财富", "sub": "热门板块", "sub2": "题材",
         "enabled": True, "fetcher": "em_theme",
         "list_path": "data",
         "fields": {"title": "themeName", "url": None, "id": "themeCode", "hot": "hotRankScore"},
@@ -402,6 +402,9 @@ SOURCES = {
 
 # 页面上网站标签的显示顺序; 没列出的网站排在最后
 SITE_ORDER = ["微博", "抖音", "今日头条", "百度热搜", "东方财富", "同花顺", "雪球", "华尔街见闻"]
+
+SUB_ORDER = {"东方财富": ["热门话题", "热股", "热门板块", "ETF"]}
+SUB2_ORDER = ["A股", "港股", "美股", "行业", "概念", "题材"]
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -663,6 +666,7 @@ def export_latest():
             "label": cfg.get("label", name),
             "site": cfg.get("site", cfg.get("label", name)),
             "sub": cfg.get("sub", ""),
+            "sub2": cfg.get("sub2", ""),
             "ranked": bool(cfg.get("ranked")),
             "captured_at": last,
             "rank_date": (cur.execute("SELECT note FROM meta WHERE source=?", (name,)).fetchone() or [None])[0],
@@ -672,7 +676,11 @@ def export_latest():
     conn.close()
     def _key(x):
         site = x.get("site")
-        return SITE_ORDER.index(site) if site in SITE_ORDER else len(SITE_ORDER)
+        si = SITE_ORDER.index(site) if site in SITE_ORDER else len(SITE_ORDER)
+        sub = SUB_ORDER.get(site, [])
+        sb = sub.index(x.get("sub")) if x.get("sub") in sub else 0
+        s2 = SUB2_ORDER.index(x.get("sub2")) if x.get("sub2") in SUB2_ORDER else 0
+        return (si, sb, s2)
     out["sources"].sort(key=_key)   # 稳定排序, 同一网站内保持原来的先后
     return out
 
