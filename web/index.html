@@ -214,7 +214,7 @@ footer{max-width:1120px;margin:0 auto;padding:0 20px 40px;font-size:12px;line-he
       d.appendChild(el('div','p '+cls(i.pct),fmtPct(i.pct)));
       ix.appendChild(d);
     });
-    c1.appendChild(ix);var ia=m.idx_at||m.updated_at;if(ia){var st=(Date.now()-parse(ia))>2400000;c1.appendChild(el('div','note'+(st?' stale':''),'行情为 '+ia.slice(5,16)+' 采集时快照'+(st?'，本轮未取到最新值':'；非交易时段显示最近收盘价')));}mktEl.appendChild(c1);
+    c1.appendChild(ix);var ia=m.idx_at||m.updated_at;if(ia){var st=(parse(state.data.generated_at)-parse(ia))>600000;c1.appendChild(el('div','note'+(st?' stale':''),'行情为 '+ia.slice(5,16)+' 采集时快照'+(st?'，本轮未取到最新值':'；非交易时段显示最近收盘价')));}mktEl.appendChild(c1);
 
     var c2=el('div','breadth');c2.appendChild(el('h3',null,'沪深涨跌家数'));
     if(m.up!=null){
