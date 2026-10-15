@@ -18,7 +18,7 @@ import re
 import sqlite3
 import time
 from datetime import datetime, timezone, timedelta
-from urllib.parse import urljoin
+from urllib.parse import urljoin, quote
 
 import requests
 import oss2
@@ -168,6 +168,8 @@ def fetch_douyin(cfg):
             j = r.json()
             lst = dig(j, "word_list") or dig(j, "data.word_list")
             if lst:
+                for w in lst:
+                    w["_url"] = "https://www.douyin.com/search/" + quote(str(w.get("word", "")))
                 return {"word_list": lst}
         except Exception as e:
             last = e
@@ -292,7 +294,7 @@ SOURCES = {
             "https://www.douyin.com/aweme/v1/web/hot/search/list/?device_platform=webapp&aid=6383&channel=channel_pc_web&detail_list=1",
         ],
         "list_path": "word_list",
-        "fields": {"title": "word", "url": None, "id": "word", "hot": "hot_value"},
+        "fields": {"title": "word", "url": "_url", "id": "word", "hot": "hot_value"},
         "ranked": True,
     },
     "em_rank": {
