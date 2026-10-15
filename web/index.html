@@ -353,11 +353,11 @@ footer{max-width:1120px;margin:0 auto;padding:0 20px 40px;font-size:12px;line-he
       state.data=d;errEl.hidden=true;
       var hasMerged=d.merged&&d.merged.length,ids=d.sources.map(function(s){return s.id;});
       if(!state.cur||(state.cur!==MERGED&&ids.indexOf(state.cur)<0)||(state.cur===MERGED&&!hasMerged))state.cur=hasMerged?MERGED:(ids[0]||null);
-      var busy=(function(){var n=new Date(Date.now()+(new Date().getTimezoneOffset()+480)*60000),h=n.getHours(),w=n.getDay();return w>=1&&w<=5&&h>=8&&h<21;})();
-      var late=(Date.now()-parse(d.generated_at))>(busy?2700000:10800000);
+      var busy=(function(){var n=new Date(Date.now()+(new Date().getTimezoneOffset()+480)*60000),m=n.getHours()*60+n.getMinutes();return m>=390&&m<1380;})();
+      var age=Date.now()-parse(d.generated_at),late=busy?age>2700000:age>32400000;
       stampEl.textContent='';stampEl.className='stamp'+(late?' late':'');
       var b=el('b',null,d.generated_at.slice(11,16));stampEl.appendChild(document.createTextNode('数据更新于 '));stampEl.appendChild(b);
-      stampEl.appendChild(document.createTextNode(late?'（更新延迟）':(busy?'　交易时段每 15 分钟更新':'　非交易时段每 2 小时更新')));
+      stampEl.appendChild(document.createTextNode(late?'（更新延迟）':(busy?'　每 15 分钟更新':'　夜间 23:00-06:30 暂停更新')));
       renderMarket(d.market);renderNav();renderList();
     }).catch(function(e){errEl.hidden=false;errEl.textContent='数据加载失败（'+e.message+'）。检查网络后刷新页面，或稍后再试。';});
   }
