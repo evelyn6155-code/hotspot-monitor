@@ -1,9 +1,7 @@
 name: caiji
 
 on:
-  schedule:
-    - cron: '*/15 0-12 * * 1-5'   # 工作日北京时间 08:00-20:45, 每 15 分钟
-    - cron: '7 */2 * * *'         # 其余时间每 2 小时一次
+  # 定时由阿里云函数计算 hotspot-timer 触发(工作日 08:00-20:59 每 15 分钟, 其余时间每 2 小时)
   workflow_dispatch:
 
 concurrency:
